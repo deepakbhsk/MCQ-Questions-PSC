@@ -1,0 +1,5 @@
+{
+  "name": "PSC MCQ Practice App",
+  "description": "An application for practicing with previous year PSC multiple-choice questions, featuring an admin panel with AI-powered question generation to manage the question bank.",
+  "requestFramePermissions": []
+}
