@@ -125,6 +125,7 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
                const level = firstQ.level;
                const examName = firstQ.name || 'Uncategorized';
                const levelColor = levelColorMap[level] || 'bg-slate-100 text-slate-700';
+               const unsolvedCount = folderQuestions.filter(q => q.correct_answer_index === -1).length;
                
                return (
                    <div key={codePrefix} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-all">
@@ -142,6 +143,11 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
                                        <span className={`text-[10px] uppercase px-2 py-0.5 rounded font-extrabold ${levelColor}`}>
                                            {level}
                                        </span>
+                                       {unsolvedCount > 0 && (
+                                            <span className="flex items-center gap-1 text-[10px] uppercase px-2 py-0.5 rounded font-extrabold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                                                <Icon name="lightning" className="w-3 h-3"/> {unsolvedCount} Unsolved
+                                            </span>
+                                       )}
                                    </h3>
                                    <p className="text-sm text-slate-500 dark:text-slate-400 truncate mt-0.5">
                                        {examName} • {folderQuestions.length} Questions
@@ -181,12 +187,20 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
                                                         {q.subtopic}
                                                     </span>
                                                 )}
+                                                {q.correct_answer_index === -1 && (
+                                                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                                        <Icon name="lightning" className="w-3 h-3"/> Unsolved
+                                                    </span>
+                                                )}
                                             </div>
                                             <p className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 leading-relaxed">
                                                 {q.question}
                                             </p>
                                             <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
-                                                Ans: {q.options[q.correct_answer_index]}
+                                                {q.correct_answer_index !== -1 
+                                                    ? `Ans: ${q.options[q.correct_answer_index]}`
+                                                    : <span className="text-amber-500">Answer needed</span>
+                                                }
                                             </div>
                                        </div>
                                        <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-center">

@@ -126,6 +126,52 @@ export const getExplanationWithAi = async (question: Question): Promise<string> 
     }
 };
 
+export const solveQuestionWithAi = async (questionText: string, options: string[]): Promise<{ correct_answer_index: number, explanation: string }> => {
+    if (!process.env.API_KEY) {
+        throw new Error("API key not configured.");
+    }
+
+    const prompt = `Act as an Expert Exam Solver.
+    
+    Question: "${questionText}"
+    Options: ${JSON.stringify(options)}
+
+    Task:
+    1. Identify the correct answer index (0-3).
+    2. Provide a detailed explanation in the standard format.
+
+    Formatting Rules:
+    - **Correct Answer:** [Text]
+    - **Detailed Explanation:** [Deep analysis]
+    - **Core Concept:** [Key takeaway]
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: reasoningModel,
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                thinkingConfig: { thinkingBudget: 2048 },
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        correct_answer_index: { type: Type.INTEGER },
+                        explanation: { type: Type.STRING }
+                    },
+                    required: ["correct_answer_index", "explanation"]
+                }
+            }
+        });
+        
+        const result = JSON.parse(response.text);
+        return result;
+    } catch (error) {
+        console.error("Error solving question with AI:", error);
+        throw new Error("Failed to solve question.");
+    }
+};
+
 export const getQuizFeedbackWithAi = async (incorrectAnswers: IncorrectAnswer[]): Promise<string> => {
     if (!process.env.API_KEY) {
         throw new Error("API key not configured.");
@@ -152,6 +198,127 @@ export const getQuizFeedbackWithAi = async (incorrectAnswers: IncorrectAnswer[])
     } catch (error) {
         console.error("Error getting quiz feedback with AI:", error);
         throw new Error("Failed to get feedback from AI.");
+    }
+};
+
+export const extractRawQuestionsFromText = async (
+    input: string | { data: string, mimeType: string },
+    count: number = 100
+): Promise<{ question: string, options: string[] }[]> => {
+    if (!process.env.API_KEY) {
+        throw new Error("API key not configured.");
+    }
+
+    // Helper function to process a single chunk
+    const processChunk = async (contentPart: any, chunkIndex: number): Promise<any[]> => {
+        const promptText = `
+        TASK: Extract Multiple Choice Questions.
+        
+        - Extract ALL MCQs found in this chunk.
+        - Do NOT solve them.
+        - Set correct_answer_index to -1.
+        - Ensure exactly 4 options.
+        - Output strict JSON array.
+        `;
+
+        const contentsPayload = {
+            parts: [
+                contentPart,
+                { text: promptText }
+            ]
+        };
+
+        try {
+            const response = await ai.models.generateContent({
+                model: fastModel, // Use Flash model for extraction to save tokens and speed
+                contents: contentsPayload,
+                config: {
+                    responseMimeType: "application/json",
+                    // Note: thinkingConfig REMOVED to maximize output token capacity for JSON
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                question: { type: Type.STRING },
+                                options: { 
+                                    type: Type.ARRAY,
+                                    items: { type: Type.STRING } 
+                                }
+                            },
+                            required: ["question", "options"]
+                        }
+                    }
+                }
+            });
+
+            return JSON.parse(response.text);
+        } catch (error) {
+            console.error(`Error processing chunk ${chunkIndex}:`, error);
+            return [];
+        }
+    };
+
+    try {
+        let allQuestions: any[] = [];
+
+        if (typeof input === 'string') {
+            // --- TEXT CHUNKING STRATEGY ---
+            // Split huge text into chunks of ~20,000 characters to bypass output token limits
+            const CHUNK_SIZE = 20000; 
+            const OVERLAP = 1000; // Overlap to ensure questions cut in half are caught in one of the chunks
+            
+            const chunks: string[] = [];
+            for (let i = 0; i < input.length; i += (CHUNK_SIZE - OVERLAP)) {
+                chunks.push(input.substring(i, i + CHUNK_SIZE));
+            }
+
+            console.log(`Split text into ${chunks.length} chunks for processing.`);
+
+            // Process chunks in parallel (careful with rate limits, but Flash is high throughput)
+            const promises = chunks.map((chunk, index) => 
+                processChunk({ text: `Analyze this text segment (Part ${index + 1}): "${chunk}"` }, index)
+            );
+
+            const results = await Promise.all(promises);
+            allQuestions = results.flat();
+
+        } else {
+            // --- PDF/IMAGE HANDLING ---
+            // We can't easily chunk binary PDF on client. 
+            // We rely on the Flash model's efficiency. 
+            // If the PDF is huge (>50 questions), user should use Text mode.
+            const result = await processChunk({ inlineData: input }, 0);
+            allQuestions = result;
+        }
+        
+        // --- DEDUPLICATION ---
+        // Because of chunk overlap, we might have duplicates. Filter them out.
+        const uniqueQuestions = new Map();
+        allQuestions.forEach((q: any) => {
+            if (!q.question || !Array.isArray(q.options)) return;
+            
+            // Normalize string to catch duplicates
+            const key = q.question.trim().toLowerCase().substring(0, 100); 
+            if (!uniqueQuestions.has(key)) {
+                uniqueQuestions.set(key, {
+                    question: q.question,
+                    options: q.options.length === 4 ? q.options : [...q.options, "Option C", "Option D"].slice(0, 4)
+                });
+            }
+        });
+
+        const finalQuestions = Array.from(uniqueQuestions.values());
+
+        if (finalQuestions.length === 0) {
+             throw new Error("AI output format invalid or empty");
+        }
+
+        return finalQuestions;
+
+    } catch (error) {
+        console.error("Error extracting questions:", error);
+        throw new Error("Failed to extract questions. For large files (>50 questions), try copying the text into 'Paste Text' mode.");
     }
 };
 

@@ -1,8 +1,9 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Question, QuestionLevel, SUBTOPIC_SUGGESTIONS, SUBTOPIC_HIERARCHY } from '../types';
 import Icon from './Icon';
 import Spinner from './Spinner';
-import { generateMcqsFromText } from '../services/geminiService';
+import { generateMcqsFromText, extractRawQuestionsFromText } from '../services/geminiService';
 
 interface BulkGenerateFormProps {
   onCancel: () => void;
@@ -13,12 +14,14 @@ interface BulkGenerateFormProps {
 }
 
 const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQuestions, disabled, existingQuestions, initialLevel }) => {
-  // Input Mode: 'text' or 'pdf'
-  const [inputMode, setInputMode] = useState<'text' | 'pdf'>('text');
+  // Input Mode: 'text' or 'pdf' or 'excel'
+  const [inputMode, setInputMode] = useState<'text' | 'pdf' | 'excel'>('text');
   
   const [rawText, setRawText] = useState('');
   const [pdfFile, setPdfFile] = useState<{ data: string, name: string } | null>(null);
+  const [excelFile, setExcelFile] = useState<{ name: string, data: any[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   const [level, setLevel] = useState<QuestionLevel>(initialLevel || QuestionLevel.DEGREE);
   
@@ -32,6 +35,7 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
   const [studyNotes, setStudyNotes] = useState<string>('');
   const [detectedTopic, setDetectedTopic] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false); // For "Extract Only" mode
   const [error, setError] = useState('');
   
   // Preview Mode State
@@ -40,7 +44,7 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
   // Autocomplete States
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement>(null);
-  const previewRef = useRef<HTMLUListElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
       if (initialLevel) {
@@ -66,17 +70,6 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
       if (!subtopic || subtopic === 'General') return [];
       return SUBTOPIC_HIERARCHY[subtopic] || [];
   }, [subtopic]);
-
-  // Reset specific topic if subtopic changes to something incompatible
-  useEffect(() => {
-      if (subtopic && availableSpecificTopics.length > 0) {
-          if (!availableSpecificTopics.includes(specificTopic) && specificTopic !== '') {
-             // Optional: Reset specific topic if it doesn't match new list
-             // setSpecificTopic(''); 
-          }
-      }
-  }, [subtopic, availableSpecificTopics, specificTopic]);
-
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -107,15 +100,19 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
   // Render LaTeX in preview
   useEffect(() => {
     if ((generatedQuestions.length > 0 || studyNotes) && previewRef.current && (window as any).renderMathInElement) {
-         (window as any).renderMathInElement(previewRef.current, {
-            delimiters: [
-                {left: '$$', right: '$$', display: true},
-                {left: '$', right: '$', display: false},
-                {left: '\\(', right: '\\)', display: false},
-                {left: '\\[', right: '\\]', display: true}
-            ],
-            throwOnError: false
-        });
+         setTimeout(() => {
+            if (previewRef.current) {
+                (window as any).renderMathInElement(previewRef.current, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false},
+                        {left: '\\(', right: '\\)', display: false},
+                        {left: '\\[', right: '\\]', display: true}
+                    ],
+                    throwOnError: false
+                });
+            }
+         }, 100);
     }
   }, [generatedQuestions, studyNotes, previewTab]);
 
@@ -171,7 +168,6 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
       if (newLevel === QuestionLevel.OTHERS || newLevel === QuestionLevel.TECHNICAL) {
           setSubtopic('General');
       } else {
-          // If switching away from Restricted, ensure we unlock/reset to Auto-detect
           if (subtopic === 'General') setSubtopic('');
       }
   };
@@ -190,7 +186,6 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
           const reader = new FileReader();
           reader.onloadend = () => {
               const base64String = reader.result as string;
-              // Remove the data URL prefix (e.g., "data:application/pdf;base64,")
               const base64Data = base64String.split(',')[1];
               setPdfFile({ data: base64Data, name: file.name });
               setError('');
@@ -198,54 +193,178 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
           reader.readAsDataURL(file);
       }
   };
+  
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = (event) => {
+                try {
+                    const data = new Uint8Array(event.target?.result as ArrayBuffer);
+                    const workbook = (window as any).XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const sheet = workbook.Sheets[sheetName];
+                    const jsonData = (window as any).XLSX.utils.sheet_to_json(sheet);
+                    
+                    if (jsonData.length === 0) {
+                        setError("The Excel file appears to be empty.");
+                        setExcelFile(null);
+                        return;
+                    }
+                    
+                    setExcelFile({ name: file.name, data: jsonData });
+                    setError('');
+                } catch (err) {
+                    console.error("Excel parse error:", err);
+                    setError("Failed to parse Excel file. Please ensure it is a valid .xlsx or .csv file.");
+                }
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+  };
+  
+  const downloadTemplate = () => {
+      const templateData = [
+          {
+              "Question": "Which is the capital of India?",
+              "Option A": "Mumbai",
+              "Option B": "Delhi",
+              "Option C": "Kolkata",
+              "Option D": "Chennai",
+              "Answer": "Option B",
+              "Explanation": "Delhi is the capital of India."
+          },
+          {
+              "Question": "The largest planet in our solar system is?",
+              "Option A": "Mars",
+              "Option B": "Jupiter",
+              "Option C": "Earth",
+              "Option D": "Saturn",
+              "Answer": "Jupiter",
+              "Explanation": "Jupiter is the largest planet."
+          }
+      ];
+      
+      const worksheet = (window as any).XLSX.utils.json_to_sheet(templateData);
+      const workbook = (window as any).XLSX.utils.book_new();
+      (window as any).XLSX.utils.book_append_sheet(workbook, worksheet, "Template");
+      (window as any).XLSX.writeFile(workbook, "PSC_Questions_Template.xlsx");
+  };
 
   const checkDuplicate = (newQ: Omit<Question, 'id' | 'created_at'>) => {
-      // 1. Check against DB questions
       const isDbDuplicate = existingQuestions.some(existing => 
           existing.question.trim().toLowerCase() === newQ.question.trim().toLowerCase() ||
-          // Fuzzy check: if 80% of start matches
           (existing.question.length > 50 && newQ.question.length > 50 && existing.question.substring(0, 50) === newQ.question.substring(0, 50))
       );
-      
       return isDbDuplicate;
   };
 
-  const handleGenerate = async () => {
-    // Logic to handle code prefix
+  const validateInputs = () => {
     let activeCodePrefix = codePrefix;
-    
     if (isTopicMode) {
-        // Auto-generate prefix from Exam Name (Main Topic)
         const sanitized = examName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 6).toUpperCase();
         activeCodePrefix = sanitized || 'TOPIC';
     }
 
     if (!examName.trim() || (!isTopicMode && !activeCodePrefix.trim())) {
       setError("Please provide required fields.");
-      return;
+      return null;
     }
 
-    let inputData: string | { data: string, mimeType: string };
-
-    if (inputMode === 'text') {
+    let inputData: any;
+    
+    if (inputMode === 'excel') {
+        if (!excelFile) {
+            setError("Please upload an Excel file first.");
+            return null;
+        }
+        inputData = excelFile.data;
+    } else if (inputMode === 'text') {
         if (!rawText.trim()) {
             setError("Please paste some text into the content area first.");
-            return;
+            return null;
         }
         inputData = rawText;
     } else {
         if (!pdfFile) {
             setError("Please upload a PDF file first.");
-            return;
+            return null;
         }
         inputData = { data: pdfFile.data, mimeType: 'application/pdf' };
     }
     
-    if(!process.env.API_KEY) {
+    if(!process.env.API_KEY && inputMode !== 'excel') {
         setError("AI feature is disabled. API key not provided.");
-        return;
+        return null;
     }
 
+    let effectiveExamName = examName;
+    let effectiveSubtopic = subtopic;
+    
+    if (isTopicMode) {
+        effectiveExamName = specificTopic || 'Auto-Detect'; 
+        const sub = subtopic || 'General';
+        effectiveSubtopic = `${examName} > ${sub}`;
+    }
+
+    return { inputData, activeCodePrefix, effectiveExamName, effectiveSubtopic };
+  };
+  
+  const processExcelData = (data: any[], vars: any) => {
+      const questions: Omit<Question, 'id' | 'created_at'>[] = [];
+      
+      data.forEach((row, index) => {
+          const normalizedRow: any = {};
+          Object.keys(row).forEach(key => {
+              normalizedRow[key.trim().toLowerCase()] = row[key];
+          });
+          
+          const qText = normalizedRow['question'] || normalizedRow['q'] || normalizedRow['statement'];
+          const optA = normalizedRow['option a'] || normalizedRow['a'] || normalizedRow['option 1'];
+          const optB = normalizedRow['option b'] || normalizedRow['b'] || normalizedRow['option 2'];
+          const optC = normalizedRow['option c'] || normalizedRow['c'] || normalizedRow['option 3'];
+          const optD = normalizedRow['option d'] || normalizedRow['d'] || normalizedRow['option 4'];
+          const ans = normalizedRow['answer'] || normalizedRow['ans'] || normalizedRow['correct'] || normalizedRow['key'];
+          const expl = normalizedRow['explanation'] || normalizedRow['exp'] || normalizedRow['rationale'];
+          
+          if (qText && optA && optB && optC && optD) {
+              const options = [String(optA), String(optB), String(optC), String(optD)];
+              let correctIdx = -1;
+              
+              if (ans) {
+                  const ansStr = String(ans).toLowerCase().trim();
+                  if (ansStr === 'a' || ansStr === 'option a') correctIdx = 0;
+                  else if (ansStr === 'b' || ansStr === 'option b') correctIdx = 1;
+                  else if (ansStr === 'c' || ansStr === 'option c') correctIdx = 2;
+                  else if (ansStr === 'd' || ansStr === 'option d') correctIdx = 3;
+                  else {
+                      const idx = options.findIndex(o => o.toLowerCase().trim() === ansStr);
+                      if (idx !== -1) correctIdx = idx;
+                  }
+              }
+              
+              questions.push({
+                  level: level,
+                  name: isTopicMode ? (specificTopic || 'Uncategorized') : vars.effectiveExamName,
+                  code: `${vars.activeCodePrefix}-${(index + 1).toString().padStart(3, '0')}`,
+                  subtopic: vars.effectiveSubtopic || 'General',
+                  question: String(qText),
+                  options: options,
+                  correct_answer_index: correctIdx,
+                  explanation: expl ? String(expl) : ''
+              });
+          }
+      });
+      
+      return questions;
+  };
+
+  const handleGenerate = async () => {
+    const vars = validateInputs();
+    if (!vars) return;
+    
     setIsGenerating(true);
     setError('');
     setGeneratedQuestions([]);
@@ -253,75 +372,66 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
     setDetectedTopic('');
 
     try {
-      // Request more questions (30) to account for duplicate filtering (we want 20)
-      // If PDF, limit request to max 30 to not overwhelm model context
-      const requestCount = inputMode === 'pdf' ? 30 : 50; 
-      
-      // Hierarchy Handling for Topic Mode:
-      // Level 1: Exam Name (Main Topic)
-      // Level 2: Subtopic
-      // Level 3: Specific Topic (Name)
-      
-      let effectiveExamName = examName;
-      let effectiveSubtopic = subtopic;
-      
-      if (isTopicMode) {
-          // In Topic Mode, we restructure the data to support 3 levels.
-          // DB 'name' field stores -> Specific Topic (Level 3)
-          // DB 'subtopic' field stores -> Main Topic > Subtopic (Levels 1 & 2)
+      if (inputMode === 'excel') {
+          // EXCEL IMPORT FLOW
+          const extractedQs = processExcelData(vars.inputData, vars);
           
-          // Use a temporary placeholder for Specific Topic if auto-detecting, it will be updated after generation
-          effectiveExamName = specificTopic || 'Auto-Detect'; 
-          
-          // Combine Main and Sub into composite
-          const sub = subtopic || 'General';
-          effectiveSubtopic = `${examName} > ${sub}`;
-      }
-
-      const result = await generateMcqsFromText(
-          inputData, 
-          level, 
-          effectiveExamName, 
-          activeCodePrefix, 
-          effectiveSubtopic, 
-          specificTopic, 
-          requestCount
-      );
-
-      if (result.questions.length === 0) {
-          setError("The AI could not generate questions. Try providing more detailed content.");
-      } else {
-          // If we were auto-detecting specific topic, update the question names now
-          let generatedQs = result.questions;
-          if (isTopicMode && !specificTopic) {
-             const finalSpecificTopic = result.detectedTopic || 'Generated Set';
-             generatedQs = generatedQs.map(q => ({
-                 ...q,
-                 name: finalSpecificTopic // Update Name to Specific Topic
-             }));
-             setDetectedTopic(finalSpecificTopic);
-          } else if (isTopicMode) {
-             setDetectedTopic(specificTopic);
-          }
-
-          // Filter Duplicates
-          const uniqueNewQuestions = generatedQs.filter(newQ => !checkDuplicate(newQ));
-          
-          const duplicateCount = generatedQs.length - uniqueNewQuestions.length;
-          
-          if (uniqueNewQuestions.length === 0) {
-              setError(`Generated ${generatedQs.length} questions, but ALL were duplicates of existing questions in the database.`);
+          if (extractedQs.length === 0) {
+              setError("Could not find any valid questions in the Excel file. Please check column headers (Question, Option A, Option B, etc.).");
           } else {
-              // Limit to 20 if PDF mode per requirements, otherwise take all unique
-              const finalQuestions = inputMode === 'pdf' ? uniqueNewQuestions.slice(0, 20) : uniqueNewQuestions;
+              const uniqueNewQuestions = extractedQs.filter(newQ => !checkDuplicate(newQ));
+              if (uniqueNewQuestions.length === 0) {
+                   setError(`Found ${extractedQs.length} questions, but ALL were duplicates.`);
+              } else {
+                   setGeneratedQuestions(uniqueNewQuestions);
+                   setPreviewTab('questions');
+              }
+          }
+      } else {
+          // AI GENERATION FLOW
+          const requestCount = inputMode === 'pdf' ? 30 : 50; 
+          
+          const result = await generateMcqsFromText(
+              vars.inputData, 
+              level, 
+              vars.effectiveExamName, 
+              vars.activeCodePrefix, 
+              vars.effectiveSubtopic, 
+              specificTopic, 
+              requestCount
+          );
+
+          if (result.questions.length === 0) {
+              setError("The AI could not generate questions. Try providing more detailed content.");
+          } else {
+              let generatedQs = result.questions;
+              if (isTopicMode && !specificTopic) {
+                 const finalSpecificTopic = result.detectedTopic || 'Generated Set';
+                 generatedQs = generatedQs.map(q => ({
+                     ...q,
+                     name: finalSpecificTopic
+                 }));
+                 setDetectedTopic(finalSpecificTopic);
+              } else if (isTopicMode) {
+                 setDetectedTopic(specificTopic);
+              }
+
+              const uniqueNewQuestions = generatedQs.filter(newQ => !checkDuplicate(newQ));
+              const duplicateCount = generatedQs.length - uniqueNewQuestions.length;
               
-              setGeneratedQuestions(finalQuestions);
-              setStudyNotes(result.studyNotes);
-              if (!isTopicMode) setDetectedTopic(result.detectedTopic);
-              setPreviewTab('questions');
-              
-              if (duplicateCount > 0) {
-                  console.info(`Filtered out ${duplicateCount} duplicate questions.`);
+              if (uniqueNewQuestions.length === 0) {
+                  setError(`Generated ${generatedQs.length} questions, but ALL were duplicates of existing questions in the database.`);
+              } else {
+                  const finalQuestions = inputMode === 'pdf' ? uniqueNewQuestions.slice(0, 20) : uniqueNewQuestions;
+                  
+                  setGeneratedQuestions(finalQuestions);
+                  setStudyNotes(result.studyNotes);
+                  if (!isTopicMode) setDetectedTopic(result.detectedTopic);
+                  setPreviewTab('questions');
+                  
+                  if (duplicateCount > 0) {
+                      console.info(`Filtered out ${duplicateCount} duplicate questions.`);
+                  }
               }
           }
       }
@@ -329,6 +439,55 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
       setError(e instanceof Error ? e.message : "An unknown error occurred.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleExtractOnly = async () => {
+    if (inputMode === 'excel') {
+        handleGenerate(); // Excel is already "extracted"
+        return;
+    }
+
+    const vars = validateInputs();
+    if (!vars) return;
+
+    setIsExtracting(true);
+    setError('');
+    setGeneratedQuestions([]);
+    setStudyNotes('');
+    setDetectedTopic('');
+
+    try {
+        const rawQs = await extractRawQuestionsFromText(vars.inputData, 100);
+        
+        if (rawQs.length === 0) {
+            setError("Could not extract any questions.");
+        } else {
+            const extractedQuestions: Omit<Question, 'id' | 'created_at'>[] = rawQs.map((q, i) => ({
+                level: level,
+                name: isTopicMode ? (specificTopic || 'Uncategorized Topic') : vars.effectiveExamName,
+                code: `${vars.activeCodePrefix}-${(i + 1).toString().padStart(3, '0')}`,
+                subtopic: vars.effectiveSubtopic || 'General',
+                question: q.question,
+                options: q.options,
+                correct_answer_index: -1, // Marked as unsolved
+                explanation: ''
+            }));
+
+            const uniqueNewQuestions = extractedQuestions.filter(newQ => !checkDuplicate(newQ));
+            
+            if (uniqueNewQuestions.length === 0) {
+                setError(`Extracted ${extractedQuestions.length} questions, but ALL were duplicates.`);
+            } else {
+                setGeneratedQuestions(uniqueNewQuestions);
+                setPreviewTab('questions');
+            }
+        }
+
+    } catch (e) {
+        setError(e instanceof Error ? e.message : "Extraction failed.");
+    } finally {
+        setIsExtracting(false);
     }
   };
 
@@ -354,7 +513,7 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
             <h3 className="text-xl font-bold mb-1 text-slate-900 dark:text-white">
                 {isTopicMode ? "Topic Generator" : "Bulk AI Generator"}
             </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Generate questions and study notes from your study material.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Generate questions from text, PDF, or import Excel.</p>
          </div>
       </div>
 
@@ -396,7 +555,6 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
                     placeholder={isTopicMode ? "e.g., Biology" : "e.g., Kerala History"}
                     autoComplete="off"
                 />
-                {/* Autocomplete Dropdown */}
                 {showSuggestions && examSuggestions.length > 0 && (
                     <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-auto">
                         {examSuggestions.map((suggestion, index) => (
@@ -431,7 +589,6 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
                         value={subtopic}
                         onChange={(e) => {
                             setSubtopic(e.target.value);
-                            // If user selects a subtopic that has specific topics, clear the specific topic field if it's invalid
                             setSpecificTopic(''); 
                         }}
                         className={`${inputClass} ${isSubtopicRestricted ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-not-allowed' : ''}`}
@@ -475,7 +632,7 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
                         value={specificTopic} 
                         onChange={(e) => setSpecificTopic(e.target.value)} 
                         className={inputClass} 
-                        placeholder={isTopicMode ? "Leave empty to auto-detect" : "Leave empty to auto-detect"}
+                        placeholder={isTopicMode ? "e.g. Indus Valley" : "Leave empty to auto-detect"}
                     />
                 )}
             </div>
@@ -496,9 +653,15 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
                 >
                     Upload PDF
                 </button>
+                 <button
+                    onClick={() => setInputMode('excel')}
+                    className={`pb-2 text-sm font-bold transition-all border-b-2 ${inputMode === 'excel' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400'}`}
+                >
+                    Excel / CSV
+                </button>
             </div>
             
-            {inputMode === 'text' ? (
+            {inputMode === 'text' && (
                 <div>
                   <textarea
                     id="rawText"
@@ -507,10 +670,12 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
                     placeholder="Paste content here... (Provide enough text for as many questions as possible)"
                     rows={8}
                     className={inputClass}
-                    disabled={isGenerating}
+                    disabled={isGenerating || isExtracting}
                   />
                 </div>
-            ) : (
+            )}
+            
+            {inputMode === 'pdf' && (
                 <div className="bg-slate-50 dark:bg-slate-900/50 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-8 text-center transition-all hover:border-indigo-400 dark:hover:border-indigo-600">
                     <input 
                         type="file" 
@@ -543,8 +708,55 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
                              <>
                                 <p className="font-bold text-slate-700 dark:text-slate-300 mb-1">Click to upload PDF</p>
                                 <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
-                                    Maximum file size: 5MB. Files are processed in-memory and not stored on the server.
+                                    Maximum file size: 5MB.
                                 </p>
+                             </>
+                        )}
+                    </label>
+                </div>
+            )}
+            
+            {inputMode === 'excel' && (
+                <div className="bg-slate-50 dark:bg-slate-900/50 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-8 text-center transition-all hover:border-indigo-400 dark:hover:border-indigo-600">
+                    <input 
+                        type="file" 
+                        ref={excelInputRef}
+                        accept=".xlsx, .xls, .csv"
+                        onChange={handleExcelUpload}
+                        className="hidden" 
+                        id="excel-upload"
+                    />
+                    <label htmlFor="excel-upload" className="cursor-pointer flex flex-col items-center">
+                        <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center mb-4 shadow-sm text-emerald-500 dark:text-emerald-400">
+                             {excelFile ? <Icon name="table" className="w-8 h-8" /> : <Icon name="upload" className="w-8 h-8" />}
+                        </div>
+                        {excelFile ? (
+                             <>
+                                <p className="font-bold text-slate-800 dark:text-white mb-1">{excelFile.name}</p>
+                                <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{excelFile.data.length} rows detected</p>
+                                <button 
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        setExcelFile(null);
+                                        if(excelInputRef.current) excelInputRef.current.value = "";
+                                    }}
+                                    className="mt-4 text-xs text-rose-500 hover:underline"
+                                >
+                                    Remove File
+                                </button>
+                             </>
+                        ) : (
+                             <>
+                                <p className="font-bold text-slate-700 dark:text-slate-300 mb-1">Click to upload Excel / CSV</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto mb-4">
+                                    Supports .xlsx, .xls, .csv
+                                </p>
+                                <button 
+                                    onClick={(e) => { e.preventDefault(); downloadTemplate(); }}
+                                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 rounded-lg text-xs font-bold text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700"
+                                >
+                                    <Icon name="download" className="w-3 h-3" /> Download Template
+                                </button>
                              </>
                         )}
                     </label>
@@ -552,98 +764,118 @@ const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQues
             )}
         </div>
 
-        <div className="flex justify-end pt-4">
+        {error && (
+            <div className="p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/30 rounded-xl flex items-start gap-3">
+                <Icon name="xCircle" className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-rose-600 dark:text-rose-400 font-medium">{error}</p>
+            </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <button
+            onClick={onCancel}
+            disabled={isGenerating || isExtracting}
+            className="py-3 px-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            Cancel
+          </button>
+          
+          <button
+            onClick={handleExtractOnly}
+            disabled={isGenerating || isExtracting}
+            className="bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 border border-sky-100 dark:border-sky-800 font-bold py-3 px-6 rounded-xl hover:bg-sky-100 dark:hover:bg-sky-900/30 transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-70 text-sm"
+          >
+            {isExtracting ? <Spinner /> : <Icon name="layers" className="w-4 h-4" />}
+            {isExtracting ? 'Extracting...' : 'Extract Questions Only'}
+          </button>
+
           <button
             onClick={handleGenerate}
-            disabled={isGenerating || disabled || (inputMode === 'pdf' && !pdfFile) || (inputMode === 'text' && !rawText)}
-            className={`${isTopicMode ? 'bg-sky-600 hover:bg-sky-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white font-bold py-3 px-6 rounded-xl transition-colors shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 text-sm`}
+            disabled={isGenerating || isExtracting}
+            className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-70 text-sm"
           >
             {isGenerating ? <Spinner /> : <Icon name="sparkles" className="w-4 h-4" />}
-            {isGenerating ? `Analyzing & Generating...` : `Generate Questions`}
+            {isGenerating ? `Processing...` : (inputMode === 'excel' ? 'Import Questions' : 'Generate with AI')}
           </button>
         </div>
-        {error && <p className="text-rose-600 font-medium text-sm bg-rose-50 p-3 rounded-lg">{error}</p>}
       </div>
       
-      {/* Generated Content Section */}
+      {/* PREVIEW SECTION */}
       {(generatedQuestions.length > 0 || studyNotes) && (
-          <div className="space-y-4 pt-8 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-                 <div>
-                     <h4 className="text-lg font-bold text-slate-900 dark:text-white">Generated Output</h4>
-                     {detectedTopic && (
-                         <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                             Detected Topic: <span className="font-bold">{detectedTopic}</span>
-                         </p>
-                     )}
-                 </div>
-                 {/* Tabs */}
-                 <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-                     <button 
-                        onClick={() => setPreviewTab('questions')}
-                        className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${previewTab === 'questions' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
-                     >
-                         Questions ({generatedQuestions.length})
-                     </button>
-                     <button 
-                        onClick={() => setPreviewTab('notes')}
-                        className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${previewTab === 'notes' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
-                     >
-                         Study Notes
-                     </button>
-                 </div>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-2 border border-slate-100 dark:border-slate-800">
-                {previewTab === 'questions' ? (
-                     <ul ref={previewRef} className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                        {generatedQuestions.map((q, index) => (
-                            <li key={index} className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <span className="text-[10px] font-bold uppercase bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">{q.code}</span>
-                                    <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-2 py-0.5 rounded">{q.subtopic}</span>
-                                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{q.name}</span>
-                                </div>
-                                <p className="font-medium text-sm mb-3 text-slate-800 dark:text-slate-200 text-justify">{renderPreviewText(q.question)}</p>
-                                <p className="text-xs text-slate-600 dark:text-slate-400 bg-emerald-50 dark:bg-emerald-900/20 p-2.5 rounded-lg border border-emerald-100 dark:border-emerald-900/30">
-                                <strong className="text-emerald-700 dark:text-emerald-400">Ans:</strong> {processLatex(q.options[q.correct_answer_index])}
-                                </p>
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <div className="relative">
-                        <div ref={previewRef as any} className="max-h-96 overflow-y-auto pr-4 custom-scrollbar p-4 text-slate-700 dark:text-slate-300 whitespace-pre-wrap text-sm leading-relaxed prose dark:prose-invert max-w-none">
-                            {studyNotes || "No notes available."}
-                        </div>
-                        <button 
-                            onClick={handleCopyNotes}
-                            className="absolute top-2 right-2 p-2 bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            title="Copy Notes"
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-lg border border-slate-200 dark:border-slate-800 overflow-hidden" ref={previewRef}>
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center flex-wrap gap-4">
+                   <div className="flex gap-2">
+                       <button
+                         onClick={() => setPreviewTab('questions')}
+                         className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${previewTab === 'questions' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                       >
+                           Questions ({generatedQuestions.length})
+                       </button>
+                       {studyNotes && (
+                        <button
+                            onClick={() => setPreviewTab('notes')}
+                            className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${previewTab === 'notes' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'}`}
                         >
-                            <Icon name="clipboardList" className="w-5 h-5"/>
+                            Study Notes
                         </button>
-                    </div>
-                )}
-            </div>
+                       )}
+                   </div>
+                   
+                   <button
+                     onClick={handleAddAll}
+                     className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-500/20 flex items-center gap-2 transition-all"
+                   >
+                       <Icon name="check" className="w-4 h-4" />
+                       Save to Database
+                   </button>
+              </div>
 
-             <div className="flex justify-end gap-3 pt-4">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="py-3 px-6 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 transition-colors"
-                >
-                    Discard
-                </button>
-                <button
-                    onClick={handleAddAll}
-                    disabled={disabled || generatedQuestions.length === 0}
-                    className="bg-emerald-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-emerald-700 transition-colors shadow-lg flex items-center gap-2 disabled:opacity-50 text-sm"
-                >
-                    <Icon name="check" className="w-4 h-4"/>
-                    Save Questions
-                </button>
-            </div>
+              <div className="p-8 max-h-[600px] overflow-y-auto custom-scrollbar">
+                  {previewTab === 'questions' && (
+                      <div className="space-y-4">
+                          {generatedQuestions.map((q, i) => (
+                              <div key={i} className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                  <div className="flex justify-between items-start mb-2">
+                                     <span className="text-[10px] font-black bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 px-1.5 py-0.5 rounded uppercase tracking-wider">{q.code}</span>
+                                     {q.subtopic && q.subtopic !== 'General' && <span className="text-[10px] font-bold text-indigo-500 uppercase">{q.subtopic}</span>}
+                                  </div>
+                                  <p className="font-bold text-slate-800 dark:text-slate-200 mb-3 text-sm">{renderPreviewText(q.question)}</p>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                                      {q.options.map((opt, idx) => (
+                                          <div key={idx} className={`text-xs px-3 py-2 rounded-lg border ${idx === q.correct_answer_index ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-600 dark:text-slate-400'}`}>
+                                              {String.fromCharCode(65 + idx)}. {renderPreviewText(opt)}
+                                          </div>
+                                      ))}
+                                  </div>
+                                  {q.explanation && (
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 italic border-t border-slate-100 dark:border-slate-800 pt-2 mt-2">
+                                          <span className="font-bold not-italic text-indigo-500">Explanation: </span>
+                                          {renderPreviewText(q.explanation.substring(0, 100))}...
+                                      </p>
+                                  )}
+                                  {q.correct_answer_index === -1 && (
+                                     <div className="mt-2 text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 inline-block px-2 py-1 rounded">
+                                         ⚠️ Answer & Explanation needed
+                                     </div>
+                                  )}
+                              </div>
+                          ))}
+                      </div>
+                  )}
+
+                  {previewTab === 'notes' && (
+                      <div className="relative">
+                          <button onClick={handleCopyNotes} className="absolute top-0 right-0 p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Copy Notes">
+                              <Icon name="clipboardList" className="w-5 h-5" />
+                          </button>
+                          <div className="prose dark:prose-invert prose-stone max-w-none text-sm">
+                              {studyNotes.split('\n').map((line, i) => (
+                                  <p key={i} className="mb-2">{renderPreviewText(line)}</p>
+                              ))}
+                          </div>
+                      </div>
+                  )}
+              </div>
           </div>
       )}
     </div>

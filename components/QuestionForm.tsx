@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Question, QuestionLevel, SUBTOPIC_SUGGESTIONS, HISTORY_SYLLABUS } from '../types';
 import Icon from './Icon';
 import Spinner from './Spinner';
-import { generateQuestionWithAi, getExplanationWithAi } from '../services/geminiService';
+import { generateQuestionWithAi, getExplanationWithAi, solveQuestionWithAi } from '../services/geminiService';
 
 interface QuestionFormProps {
   onSubmit: (question: Omit<Question, 'id' | 'created_at'> | Question) => void;
@@ -30,8 +30,9 @@ const QuestionForm: React.FC<QuestionFormProps> = ({ onSubmit, onCancel, initial
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiError, setAiError] = useState('');
   
-  // State for explanation regeneration
+  // State for explanation regeneration and solving
   const [isRegeneratingExpl, setIsRegeneratingExpl] = useState(false);
+  const [isSolving, setIsSolving] = useState(false);
 
   // Autocomplete States
   const [showNameSuggestions, setShowNameSuggestions] = useState(false);
@@ -127,6 +128,32 @@ const QuestionForm: React.FC<QuestionFormProps> = ({ onSubmit, onCancel, initial
           alert("Failed to regenerate explanation.");
       } finally {
           setIsRegeneratingExpl(false);
+      }
+  };
+
+  const handleSolveWithAi = async () => {
+      if (!formData.question || !formData.options || formData.options.length < 2) {
+          alert("Please ensure the Question and Options are filled out.");
+          return;
+      }
+      if(!process.env.API_KEY) {
+          alert("AI feature is disabled.");
+          return;
+      }
+
+      setIsSolving(true);
+      try {
+          const result = await solveQuestionWithAi(formData.question, formData.options);
+          setFormData(prev => ({
+              ...prev,
+              correct_answer_index: result.correct_answer_index,
+              explanation: result.explanation
+          }));
+      } catch (error) {
+          console.error(error);
+          alert("Failed to solve question.");
+      } finally {
+          setIsSolving(false);
       }
   };
 
@@ -351,21 +378,42 @@ const QuestionForm: React.FC<QuestionFormProps> = ({ onSubmit, onCancel, initial
               </div>
             ))}
           </div>
+          {formData.correct_answer_index === -1 && (
+              <div className="mt-3 text-amber-600 dark:text-amber-500 text-xs font-bold flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 p-2 rounded-lg border border-amber-100 dark:border-amber-800">
+                  <Icon name="lightning" className="w-4 h-4" />
+                  Answer not yet identified. Use "Solve & Explain" below or select manually.
+              </div>
+          )}
         </div>
 
         <div>
-          <div className="flex justify-between items-end mb-1">
+          <div className="flex flex-wrap justify-between items-end mb-1 gap-2">
              <label htmlFor="explanation" className={labelClass}>Explanation</label>
-             <button
-                type="button"
-                onClick={handleRegenerateExplanation}
-                disabled={isRegeneratingExpl}
-                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200 flex items-center gap-1 transition-colors"
-                title="Generate explanation based on the current question text and options"
-             >
-                 {isRegeneratingExpl ? <Spinner /> : <Icon name="sparkles" className="w-3 h-3" />}
-                 Regenerate
-             </button>
+             <div className="flex items-center gap-2">
+                 {/* Solve Button */}
+                 <button
+                    type="button"
+                    onClick={handleSolveWithAi}
+                    disabled={isSolving}
+                    className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm"
+                    title="Find the correct answer and explanation for this specific question"
+                 >
+                     {isSolving ? <Spinner /> : <Icon name="checkCircle" className="w-3 h-3" />}
+                     Solve & Explain
+                 </button>
+                 
+                 {/* Regenerate Explanation Only */}
+                 <button
+                    type="button"
+                    onClick={handleRegenerateExplanation}
+                    disabled={isRegeneratingExpl}
+                    className="text-xs font-bold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 flex items-center gap-1 transition-colors px-2 py-1.5"
+                    title="Generate explanation based on the current question text and options"
+                 >
+                     {isRegeneratingExpl ? <Spinner /> : <Icon name="sparkles" className="w-3 h-3" />}
+                     Regenerate
+                 </button>
+             </div>
           </div>
           <textarea
             id="explanation"
