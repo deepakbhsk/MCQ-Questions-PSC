@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Question, QuestionLevel } from '../types';
 import Icon from './Icon';
 
@@ -25,10 +25,32 @@ const levelColorMap: Record<QuestionLevel, string> = {
 
 const getCodePrefix = (code: string | undefined) => code ? code.split('-').slice(0, -1).join('-') || code.split('-')[0] : 'Uncategorized';
 
+const groupQuestionsByPrefix = (qs: Question[]) => {
+  const groups = new Map<string, Question[]>();
+  for (const q of qs) {
+    const prefix = getCodePrefix(q.code);
+    if (!groups.has(prefix)) {
+      groups.set(prefix, []);
+    }
+    groups.get(prefix)!.push(q);
+  }
+  return groups;
+};
 
 const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete, onDeleteSet, onEditSet }) => {
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Automatically open the first folder when questions load and none are open
+  useEffect(() => {
+    if (questions.length > 0 && openFolders.size === 0 && !searchTerm) {
+      const groups = groupQuestionsByPrefix(questions);
+      const firstFolder = groups.keys().next().value;
+      if (firstFolder) {
+        setOpenFolders(new Set([firstFolder]));
+      }
+    }
+  }, [questions, searchTerm]);
 
   const filteredQuestions = useMemo(() => {
     if (!searchTerm.trim()) return questions;
@@ -42,14 +64,7 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
   }, [questions, searchTerm]);
 
   const groupedQuestions = useMemo(() => {
-    const groups = new Map<string, Question[]>();
-    for (const q of filteredQuestions) {
-      const prefix = getCodePrefix(q.code);
-      if (!groups.has(prefix)) {
-        groups.set(prefix, []);
-      }
-      groups.get(prefix)!.push(q);
-    }
+    const groups = groupQuestionsByPrefix(filteredQuestions);
     
     // Sort questions within each group by created_at (Ascending/FIFO)
     // If timestamps are identical (batch import), fallback to Code (Numeric sort) to prevent shuffling
@@ -59,14 +74,8 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true });
     }));
     
-    if (groups.size > 0 && openFolders.size === 0 && !searchTerm) {
-        setOpenFolders(new Set([groups.keys().next().value]));
-    } else if (searchTerm && groups.size > 0) {
-        setOpenFolders(new Set(groups.keys()));
-    }
-
     return new Map([...groups.entries()].sort());
-  }, [filteredQuestions, searchTerm]);
+  }, [filteredQuestions]);
 
   const toggleFolder = (codePrefix: string) => {
     setOpenFolders(prev => {
@@ -120,7 +129,8 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
            </div>
        ) : (
            Array.from(groupedQuestions.entries()).map(([codePrefix, folderQuestions]) => {
-               const isOpen = openFolders.has(codePrefix);
+               // Optimization: Derive open state from searchTerm to avoid redundant state updates
+               const isOpen = searchTerm ? true : openFolders.has(codePrefix);
                const firstQ = folderQuestions[0];
                const level = firstQ.level;
                const examName = firstQ.name || 'Uncategorized';
