@@ -1,0 +1,3 @@
+## 2025-05-22 - [Optimizing QuestionList Search and Rendering]
+**Learning:** Updating state within a `useMemo` hook is a significant React anti-pattern that triggers redundant render cycles. In search-heavy components like `QuestionList`, deriving the "open" state of folders directly from the search term during the render phase is far more efficient than syncing it to state on every keystroke.
+**Action:** Always check for state updates inside `useMemo` or during the render phase. Prefer derived state for transient UI behaviors (like opening all folders during a search) to minimize re-renders and improve input responsiveness.
