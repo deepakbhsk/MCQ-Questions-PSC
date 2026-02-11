@@ -149,7 +149,7 @@ interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
 }
 
-const Icon: React.FC<IconProps> = ({ name, className = 'w-6 h-6', ...props }) => {
+const Icon: React.FC<IconProps> = React.memo(({ name, className = 'w-6 h-6', ...props }) => {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -163,6 +163,6 @@ const Icon: React.FC<IconProps> = ({ name, className = 'w-6 h-6', ...props }) =>
       {icons[name] || icons['academicCap']}
     </svg>
   );
-};
+});
 
 export default Icon;
