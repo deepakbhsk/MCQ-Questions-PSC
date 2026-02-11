@@ -58,15 +58,9 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         if (timeCompare !== 0) return timeCompare;
         return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true });
     }));
-    
-    if (groups.size > 0 && openFolders.size === 0 && !searchTerm) {
-        setOpenFolders(new Set([groups.keys().next().value]));
-    } else if (searchTerm && groups.size > 0) {
-        setOpenFolders(new Set(groups.keys()));
-    }
 
     return new Map([...groups.entries()].sort());
-  }, [filteredQuestions, searchTerm]);
+  }, [filteredQuestions]);
 
   const toggleFolder = (codePrefix: string) => {
     setOpenFolders(prev => {
@@ -79,6 +73,8 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         return newSet;
     });
   };
+
+  const firstFolderKey = useMemo(() => groupedQuestions.keys().next().value, [groupedQuestions]);
 
   const handleDeleteFolder = (e: React.MouseEvent, codePrefix: string, folderQuestions: Question[]) => {
       e.stopPropagation();
@@ -120,7 +116,14 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
            </div>
        ) : (
            Array.from(groupedQuestions.entries()).map(([codePrefix, folderQuestions]) => {
-               const isOpen = openFolders.has(codePrefix);
+               // Optimization: Derive 'isOpen' state to prevent redundant re-renders during search
+               // Folders are open if:
+               // 1. User is searching
+               // 2. User explicitly toggled it open
+               // 3. It's the first folder and none are explicitly open (and not searching)
+               const isOpen = searchTerm.trim() !== '' ||
+                             openFolders.has(codePrefix) ||
+                             (openFolders.size === 0 && codePrefix === firstFolderKey);
                const firstQ = folderQuestions[0];
                const level = firstQ.level;
                const examName = firstQ.name || 'Uncategorized';
