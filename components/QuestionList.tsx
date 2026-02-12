@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Question, QuestionLevel } from '../types';
 import Icon from './Icon';
 
@@ -59,14 +59,15 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true });
     }));
     
-    if (groups.size > 0 && openFolders.size === 0 && !searchTerm) {
-        setOpenFolders(new Set([groups.keys().next().value]));
-    } else if (searchTerm && groups.size > 0) {
-        setOpenFolders(new Set(groups.keys()));
-    }
-
     return new Map([...groups.entries()].sort());
-  }, [filteredQuestions, searchTerm]);
+  }, [filteredQuestions]);
+
+  // Handle initial folder open state and search-based opening
+  useEffect(() => {
+    if (!searchTerm && openFolders.size === 0 && groupedQuestions.size > 0) {
+      setOpenFolders(new Set([groupedQuestions.keys().next().value]));
+    }
+  }, [groupedQuestions, searchTerm, openFolders.size]);
 
   const toggleFolder = (codePrefix: string) => {
     setOpenFolders(prev => {
@@ -120,7 +121,8 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
            </div>
        ) : (
            Array.from(groupedQuestions.entries()).map(([codePrefix, folderQuestions]) => {
-               const isOpen = openFolders.has(codePrefix);
+               // If searching, all folders are open. Otherwise, use state.
+               const isOpen = searchTerm ? true : openFolders.has(codePrefix);
                const firstQ = folderQuestions[0];
                const level = firstQ.level;
                const examName = firstQ.name || 'Uncategorized';
