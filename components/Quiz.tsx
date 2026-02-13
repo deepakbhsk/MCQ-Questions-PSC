@@ -13,7 +13,6 @@ interface QuizProps {
 }
 
 type ViewState = 'intro' | 'home' | 'level' | 'exam' | 'set' | 'quiz' | 'score' | 'topic_list' | 'topic_set' | 'bookmark_set' | 'study_generator' | 'study_prep' | 'topic_library' | 'topic_library_sub' | 'topic_library_specific';
-type NavTab = 'dashboard' | 'subjects' | 'bookmarks';
 
 // Polished, less neon colors for the levels
 const levelVisuals: Record<QuestionLevel, { icon: React.ComponentProps<typeof Icon>['name'], color: string, bg: string, border: string }> = {
@@ -46,6 +45,8 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<string, number>>({});
   const [bookmarkedQuestionIds, setBookmarkedQuestionIds] = useState<Set<string>>(new Set());
+  const [markedForReviewQuestionIds, setMarkedForReviewQuestionIds] = useState<Set<string>>(new Set());
+  const [quizHistory, setQuizHistory] = useState<any[]>([]);
   
   const [score, setScore] = useState(0);
   const [incorrectAnswers, setIncorrectAnswers] = useState<IncorrectAnswer[]>([]);
@@ -63,6 +64,16 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
         console.error("Failed to parse bookmarks", e);
       }
     }
+
+    const historyStored = localStorage.getItem('psc-mcq-history');
+    if (historyStored) {
+        try {
+            setQuizHistory(JSON.parse(historyStored));
+        } catch (e) {
+            console.error("Failed to parse history", e);
+        }
+    }
+
     setDailyQuote(getRandomQuote());
     
     const timer = setTimeout(() => {
@@ -170,6 +181,7 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
   const startQuizSession = () => {
       setCurrentQuestionIndex(0);
       setUserAnswers({});
+      setMarkedForReviewQuestionIds(new Set());
       setScore(0);
       setIncorrectAnswers([]);
       setStartTime(Date.now());
@@ -253,6 +265,16 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
   };
   
   const handleMarkForReview = () => {
+      const currentQ = quizQuestions[currentQuestionIndex];
+      setMarkedForReviewQuestionIds(prev => {
+          const newSet = new Set(prev);
+          if (newSet.has(currentQ.id)) {
+              newSet.delete(currentQ.id);
+          } else {
+              newSet.add(currentQ.id);
+          }
+          return newSet;
+      });
   };
 
   const toggleBookmark = () => {
@@ -303,6 +325,26 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
       setView('home');
       setPath({ mode: null, level: null, exam: null, subtopic: null, chunkIndex: null });
       setCustomQuiz(null);
+
+      const historyStored = localStorage.getItem('psc-mcq-history');
+      if (historyStored) {
+          try {
+              setQuizHistory(JSON.parse(historyStored));
+          } catch (e) {
+              console.error("Failed to parse history", e);
+          }
+      }
+  };
+
+  const startBookmarksQuiz = () => {
+      const bookmarkedQs = questions.filter(q => bookmarkedQuestionIds.has(q.id));
+      if (bookmarkedQs.length === 0) {
+          alert("You don't have any bookmarked questions yet.");
+          return;
+      }
+      setQuizQuestions(bookmarkedQs);
+      setPath({ mode: 'bookmarks', level: null, exam: 'Bookmarked Questions', subtopic: null, chunkIndex: null });
+      startQuizSession();
   };
 
   const renderLevelView = () => {
@@ -460,6 +502,7 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
                       onSaveNext={handleSaveNext}
                       onClearResponse={handleClearResponse}
                       onMarkForReview={handleMarkForReview}
+                      isMarkedForReview={markedForReviewQuestionIds.has(currentQuestion.id)}
                       isFirst={isFirst}
                       isLast={isLast}
                       isBookmarked={bookmarkedQuestionIds.has(currentQuestion.id)}
@@ -697,9 +740,96 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
       return renderExamView();
   }
 
+  if (view === 'bookmark_set') {
+      const bookmarkedQs = questions.filter(q => bookmarkedQuestionIds.has(q.id));
+      return (
+        <div className="animate-fade-in pb-20">
+             <div className="flex items-center gap-2 mb-6 cursor-pointer hover:opacity-75 transition-opacity" onClick={() => setView('home')}>
+                <Icon name="chevronLeft" className="w-5 h-5 text-stone-400" />
+                <h2 className="text-xl font-bold text-stone-900 dark:text-white">Your Bookmarks</h2>
+            </div>
+
+            {bookmarkedQs.length === 0 ? (
+                <div className="text-center py-20 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800">
+                    <div className="w-16 h-16 bg-stone-50 dark:bg-stone-800 rounded-full flex items-center justify-center mx-auto mb-4 text-stone-300">
+                        <Icon name="bookmark" className="w-8 h-8" />
+                    </div>
+                    <p className="text-stone-500 dark:text-stone-400 font-medium">No bookmarks found yet.</p>
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    <button
+                        onClick={startBookmarksQuiz}
+                        className="w-full p-4 bg-indigo-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg hover:bg-indigo-700 transition-colors mb-6"
+                    >
+                        <Icon name="refresh" className="w-5 h-5" /> Practice All Bookmarks ({bookmarkedQs.length})
+                    </button>
+
+                    <div className="grid grid-cols-1 gap-3">
+                        {bookmarkedQs.map(q => (
+                            <div key={q.id} className="p-4 bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 shadow-sm flex justify-between items-center group">
+                                <div className="flex-1 min-w-0 pr-4">
+                                    <p className="text-sm font-medium text-stone-800 dark:text-stone-200 line-clamp-1">{q.question}</p>
+                                    <p className="text-[10px] text-stone-400 mt-1 uppercase font-bold tracking-wider">{q.level} • {q.name || 'Uncategorized'}</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setQuizQuestions([q]);
+                                        setPath({ mode: 'bookmarks', level: null, exam: 'Single Bookmark', subtopic: null, chunkIndex: null });
+                                        startQuizSession();
+                                    }}
+                                    className="p-2 bg-stone-50 dark:bg-stone-800 rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-600 hover:text-white transition-all"
+                                >
+                                    <Icon name="chevronRight" className="w-5 h-5" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+      );
+  }
+
   return (
     <div className="animate-fade-in pb-20">
         
+        {/* Recent Performance Section */}
+        {quizHistory.length > 0 && (
+            <div className="mb-8">
+                <div className="flex items-center justify-between mb-4 px-2">
+                    <h3 className="text-lg font-bold text-stone-900 dark:text-white tracking-tight flex items-center gap-2">
+                        <Icon name="lightning" className="w-5 h-5 text-indigo-500" />
+                        Recent Performance
+                    </h3>
+                    <button
+                        onClick={() => { localStorage.removeItem('psc-mcq-history'); setQuizHistory([]); }}
+                        className="text-xs font-bold text-stone-400 hover:text-rose-500 transition-colors"
+                    >
+                        Clear History
+                    </button>
+                </div>
+                <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x">
+                    {quizHistory.map((record) => (
+                        <div key={record.id} className="min-w-[160px] snap-start bg-white dark:bg-stone-900 p-4 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-sm flex-shrink-0">
+                            <div className="flex justify-between items-start mb-2">
+                                <span className={`text-xs font-black px-2 py-0.5 rounded ${record.percentage >= 70 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400'}`}>
+                                    {record.percentage}%
+                                </span>
+                                <span className="text-[10px] text-stone-400 font-bold uppercase tracking-tighter">
+                                    {new Date(record.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                </span>
+                            </div>
+                            <div className="mt-3">
+                                <p className="text-xl font-black text-stone-900 dark:text-white leading-none">{record.score}<span className="text-stone-400 text-sm font-bold">/{record.total}</span></p>
+                                <p className="text-[10px] font-bold text-stone-500 dark:text-stone-400 uppercase mt-1 tracking-wider">Questions</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
+
         {/* Daily Motivation Quote */}
         {dailyQuote && (
             <div className="mb-8 p-6 bg-white dark:bg-stone-900 rounded-xl shadow-sm border border-stone-200 dark:border-stone-800 relative overflow-hidden group hover:border-indigo-200 transition-all">
@@ -719,29 +849,61 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
         <div className="space-y-8">
             
             <section>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                        onClick={() => setView('topic_library')}
+                        className="bg-white dark:bg-stone-900 p-5 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-sm hover:border-sky-400 transition-all text-left flex items-center gap-4 group"
+                    >
+                        <div className="w-12 h-12 bg-sky-50 dark:bg-sky-900/10 rounded-xl flex items-center justify-center text-sky-600 dark:text-sky-400 group-hover:bg-sky-600 group-hover:text-white transition-colors">
+                            <Icon name="collection" className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-stone-900 dark:text-white group-hover:text-sky-600 transition-colors">Topic Library</h4>
+                            <p className="text-xs text-stone-500 dark:text-stone-400">Structured subjects</p>
+                        </div>
+                    </button>
+                    <button
+                        onClick={() => setView('bookmark_set')}
+                        className="bg-white dark:bg-stone-900 p-5 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-sm hover:border-amber-400 transition-all text-left flex items-center gap-4 group"
+                    >
+                        <div className="w-12 h-12 bg-amber-50 dark:bg-amber-900/10 rounded-xl flex items-center justify-center text-amber-600 dark:text-amber-400 group-hover:bg-amber-500 group-hover:text-white transition-colors">
+                            <Icon name="bookmarkSolid" className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-stone-900 dark:text-white group-hover:text-amber-600 transition-colors">My Bookmarks</h4>
+                            <p className="text-xs text-stone-500 dark:text-stone-400">{bookmarkedQuestionIds.size} Saved Items</p>
+                        </div>
+                    </button>
+                </div>
+            </section>
+
+            <section>
                  <div className="flex items-center gap-3 mb-4 px-2">
-                    <div className="p-2 bg-sky-50 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400 rounded-lg">
-                        <Icon name="folder" className="w-5 h-5" />
+                    <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                        <Icon name="sparkles" className="w-5 h-5" />
                     </div>
-                    <h3 className="text-lg font-bold text-stone-900 dark:text-white tracking-tight">Topic Wise Library</h3>
+                    <h3 className="text-lg font-bold text-stone-900 dark:text-white tracking-tight">AI Study Tools</h3>
                  </div>
                  
                  <button 
-                    onClick={() => setView('topic_library')}
-                    className="w-full bg-white dark:bg-stone-900 p-6 rounded-xl border border-stone-200 dark:border-stone-800 shadow-sm hover:border-sky-400 transition-all text-left flex items-center justify-between group"
+                    onClick={() => setView('study_generator')}
+                    className="w-full bg-indigo-600 p-6 rounded-2xl border border-indigo-500 shadow-lg hover:shadow-indigo-500/25 transition-all text-left flex items-center justify-between group overflow-hidden relative"
                  >
-                     <div className="flex items-center gap-5">
-                         <div className="w-14 h-14 bg-sky-50 dark:bg-sky-900/10 rounded-xl flex items-center justify-center text-sky-600 dark:text-sky-400 group-hover:bg-sky-600 group-hover:text-white transition-colors">
-                             <Icon name="collection" className="w-7 h-7" />
+                     <div className="absolute top-0 right-0 p-8 opacity-10 transform translate-x-4 -translate-y-4 group-hover:scale-110 transition-transform">
+                         <Icon name="sparkles" className="w-32 h-32 text-white" />
+                     </div>
+                     <div className="flex items-center gap-5 relative z-10">
+                         <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center text-white">
+                             <Icon name="lightBulb" className="w-7 h-7" />
                          </div>
                          <div>
-                             <h4 className="text-lg font-bold text-stone-900 dark:text-white group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">Browse Topics</h4>
-                             <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                                 Structured learning by subject
+                             <h4 className="text-lg font-bold text-white">AI Study Companion</h4>
+                             <p className="text-sm text-indigo-100 mt-1">
+                                 Generate quiz from your notes
                              </p>
                          </div>
                      </div>
-                     <div className="w-10 h-10 rounded-full border border-stone-100 dark:border-stone-800 flex items-center justify-center text-stone-300 group-hover:border-sky-200 group-hover:text-sky-500 transition-all">
+                     <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white relative z-10">
                         <Icon name="chevronRight" className="w-5 h-5" />
                      </div>
                  </button>

@@ -15,6 +15,7 @@ interface QuestionCardProps {
   onPrevious: () => void;
   onClearResponse?: () => void;
   onMarkForReview?: () => void;
+  isMarkedForReview?: boolean;
   isFirst: boolean;
   isLast: boolean;
   isBookmarked?: boolean;
@@ -31,6 +32,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
     onPrevious,
     onClearResponse,
     onMarkForReview,
+    isMarkedForReview,
     isFirst,
     isLast,
     isBookmarked, 
@@ -215,9 +217,16 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
   return (
     <div ref={cardRef} className="flex flex-col min-h-full w-full">
       <div className="flex justify-between items-start mb-8 gap-6">
-          <h3 className="text-lg sm:text-xl font-medium text-stone-900 dark:text-stone-100 leading-relaxed tracking-tight whitespace-pre-wrap text-justify">
-              {renderQuestionText(formattedQuestion)}
-          </h3>
+          <div className="flex-1">
+              {isMarkedForReview && (
+                  <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold text-fuchsia-600 dark:text-fuchsia-400 uppercase tracking-widest bg-fuchsia-50 dark:bg-fuchsia-900/20 w-fit px-2 py-0.5 rounded border border-fuchsia-100 dark:border-fuchsia-800">
+                      <Icon name="sparkles" className="w-3 h-3" /> Marked for Review
+                  </div>
+              )}
+              <h3 className="text-lg sm:text-xl font-medium text-stone-900 dark:text-stone-100 leading-relaxed tracking-tight whitespace-pre-wrap text-justify">
+                  {renderQuestionText(formattedQuestion)}
+              </h3>
+          </div>
           
           {onToggleBookmark && mode === 'practice' && (
               <button
@@ -347,9 +356,9 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
                   <div className="flex gap-3 w-full sm:w-auto flex-1">
                       <button 
                           onClick={onMarkForReview ? () => { onMarkForReview(); if(!isLast) onNext(); } : undefined} 
-                          className="flex-1 sm:flex-none px-4 py-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 text-fuchsia-700 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-800 rounded-xl text-sm font-bold hover:bg-fuchsia-100 transition-colors active:scale-[0.98]"
+                          className={`flex-1 sm:flex-none px-4 py-3 border rounded-xl text-sm font-bold transition-colors active:scale-[0.98] ${isMarkedForReview ? 'bg-fuchsia-600 text-white border-fuchsia-600 hover:bg-fuchsia-700' : 'bg-fuchsia-50 dark:bg-fuchsia-900/20 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-200 dark:border-fuchsia-800 hover:bg-fuchsia-100'}`}
                       >
-                          {isLast ? 'Mark Review' : 'Mark Review & Next'}
+                          {isLast ? (isMarkedForReview ? 'Unmark Review' : 'Mark Review') : (isMarkedForReview ? 'Unmark & Next' : 'Mark Review & Next')}
                       </button>
                       
                       <button onClick={onClearResponse} className="flex-1 sm:flex-none px-4 py-3 bg-stone-50 dark:bg-stone-800 text-stone-600 dark:text-stone-400 border border-stone-200 dark:border-stone-700 rounded-xl text-sm font-bold hover:bg-stone-100 transition-colors active:scale-[0.98]">

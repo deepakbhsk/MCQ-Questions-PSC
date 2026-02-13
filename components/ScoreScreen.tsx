@@ -74,25 +74,44 @@ const ScoreScreen: React.FC<ScoreScreenProps> = ({ score, total, userAnswersCoun
     useEffect(() => {
         if (finalPercentage === 0) {
             setPercentage(0);
-            return;
-        };
-        
-        let start = 0;
-        const duration = 1500;
-        const increment = finalPercentage / (duration / 16); 
+        } else {
+            let start = 0;
+            const duration = 1500;
+            const increment = finalPercentage / (duration / 16);
 
-        const timer = setInterval(() => {
-            start += increment;
-            if (start >= finalPercentage) {
-                setPercentage(finalPercentage);
-                clearInterval(timer);
-            } else {
-                setPercentage(Math.ceil(start));
-            }
-        }, 16);
-
-        return () => clearInterval(timer);
+            const timer = setInterval(() => {
+                start += increment;
+                if (start >= finalPercentage) {
+                    setPercentage(finalPercentage);
+                    clearInterval(timer);
+                } else {
+                    setPercentage(Math.ceil(start));
+                }
+            }, 16);
+            return () => clearInterval(timer);
+        }
     }, [finalPercentage]);
+
+    // Save result to history
+    useEffect(() => {
+        try {
+            const historyStr = localStorage.getItem('psc-mcq-history');
+            const history = historyStr ? JSON.parse(historyStr) : [];
+            const newRecord = {
+                id: Date.now().toString(),
+                date: new Date().toISOString(),
+                score,
+                total,
+                percentage: finalPercentage,
+                timeTaken
+            };
+            // Keep last 10 records
+            const updatedHistory = [newRecord, ...history].slice(0, 10);
+            localStorage.setItem('psc-mcq-history', JSON.stringify(updatedHistory));
+        } catch (e) {
+            console.error("Failed to save quiz history", e);
+        }
+    }, [score, total, finalPercentage, timeTaken]);
 
 
     const [feedback, setFeedback] = useState<string | null>(null);

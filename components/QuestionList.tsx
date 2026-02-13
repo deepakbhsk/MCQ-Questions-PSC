@@ -58,19 +58,27 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         if (timeCompare !== 0) return timeCompare;
         return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true });
     }));
-    
-    if (groups.size > 0 && openFolders.size === 0 && !searchTerm) {
-        setOpenFolders(new Set([groups.keys().next().value]));
-    } else if (searchTerm && groups.size > 0) {
-        setOpenFolders(new Set(groups.keys()));
-    }
 
     return new Map([...groups.entries()].sort());
-  }, [filteredQuestions, searchTerm]);
+  }, [filteredQuestions]);
+
+  const effectiveOpenFolders = useMemo(() => {
+    if (searchTerm.trim()) {
+        return new Set(groupedQuestions.keys());
+    }
+    return openFolders;
+  }, [openFolders, searchTerm, groupedQuestions]);
+
+  // Open first folder by default on load
+  useEffect(() => {
+      if (groupedQuestions.size > 0 && openFolders.size === 0 && !searchTerm) {
+          setOpenFolders(new Set([groupedQuestions.keys().next().value]));
+      }
+  }, [groupedQuestions.size > 0]);
 
   const toggleFolder = (codePrefix: string) => {
     setOpenFolders(prev => {
-        const newSet = new Set(prev);
+        const newSet = new Set(prev.size === 0 && groupedQuestions.size > 0 ? [groupedQuestions.keys().next().value, ...prev] : prev);
         if (newSet.has(codePrefix)) {
             newSet.delete(codePrefix);
         } else {
@@ -120,7 +128,7 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
            </div>
        ) : (
            Array.from(groupedQuestions.entries()).map(([codePrefix, folderQuestions]) => {
-               const isOpen = openFolders.has(codePrefix);
+               const isOpen = effectiveOpenFolders.has(codePrefix);
                const firstQ = folderQuestions[0];
                const level = firstQ.level;
                const examName = firstQ.name || 'Uncategorized';
