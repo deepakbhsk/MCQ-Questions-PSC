@@ -165,4 +165,4 @@ const Icon: React.FC<IconProps> = ({ name, className = 'w-6 h-6', ...props }) =>
   );
 };
 
-export default Icon;
+export default React.memo(Icon);
