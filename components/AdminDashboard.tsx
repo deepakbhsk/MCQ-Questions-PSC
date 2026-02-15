@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Question, QuestionLevel, SUBTOPIC_SUGGESTIONS } from '../types';
 import QuestionForm from './QuestionForm';
 import QuestionList from './QuestionList';
@@ -61,12 +61,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return { totalQs, exams, sets };
   }, [filteredQuestions]);
 
-  const handleEdit = (question: Question) => {
+  const handleEdit = useCallback((question: Question) => {
     setEditingQuestion(question);
     setIsBulkFormVisible(false);
     setIsFormVisible(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, []);
 
   const handleFormSubmit = (question: Omit<Question, 'id' | 'created_at'> | Question) => {
       if('id' in question && question.id) {
@@ -132,7 +132,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setInitialBulkLevel(null);
   }
 
-  const handleEditSet = (prefix: string, setQuestions: Question[]) => {
+  const handleEditSet = useCallback((prefix: string, setQuestions: Question[]) => {
       if (setQuestions.length === 0) return;
       const first = setQuestions[0];
       setBatchEditData({
@@ -141,7 +141,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           prefix: prefix
       });
       setEditingSet({ prefix, questions: setQuestions });
-  };
+  }, []);
+
+  const handleDelete = useCallback((id: string) => {
+      onDeleteQuestion(id);
+  }, [onDeleteQuestion]);
+
+  const handleDeleteSet = useCallback((ids: string[]) => {
+      onDeleteQuestions(ids);
+  }, [onDeleteQuestions]);
 
   const handleSaveSet = () => {
       if (!editingSet) return;
@@ -326,8 +334,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <QuestionList
                 questions={filteredQuestions}
                 onEdit={handleEdit}
-                onDelete={onDeleteQuestion}
-                onDeleteSet={onDeleteQuestions}
+                onDelete={handleDelete}
+                onDeleteSet={handleDeleteSet}
                 onEditSet={handleEditSet}
             />
         </div>
