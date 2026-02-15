@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { Question, QuestionLevel } from '../types';
 import Icon from './Icon';
 
@@ -25,8 +25,57 @@ const levelColorMap: Record<QuestionLevel, string> = {
 
 const getCodePrefix = (code: string | undefined) => code ? code.split('-').slice(0, -1).join('-') || code.split('-')[0] : 'Uncategorized';
 
+interface QuestionListItemProps {
+    q: Question;
+    onEdit: (question: Question) => void;
+    onDelete: (id: string) => void;
+}
 
-const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete, onDeleteSet, onEditSet }) => {
+const QuestionListItem: React.FC<QuestionListItemProps> = React.memo(({ q, onEdit, onDelete }) => (
+    <div key={q.id} className="p-4 border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-white dark:hover:bg-slate-800 transition-colors group flex gap-4">
+        <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-bold uppercase bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-600">{q.code}</span>
+                {q.subtopic && q.subtopic !== 'General' && (
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-1.5 py-0.5 rounded">
+                        {q.subtopic}
+                    </span>
+                )}
+                {q.correct_answer_index === -1 && (
+                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <Icon name="lightning" className="w-3 h-3"/> Unsolved
+                    </span>
+                )}
+            </div>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 leading-relaxed">
+                {q.question}
+            </p>
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                {q.correct_answer_index !== -1
+                    ? `Ans: ${q.options[q.correct_answer_index]}`
+                    : <span className="text-amber-500">Answer needed</span>
+                }
+            </div>
+        </div>
+        <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-center">
+            <button
+                onClick={() => onEdit(q)}
+                className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 shadow-sm"
+            >
+                <Icon name="pencil" className="w-4 h-4" />
+            </button>
+            <button
+                onClick={() => onDelete(q.id)}
+                className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 shadow-sm"
+            >
+                <Icon name="trash" className="w-4 h-4" />
+            </button>
+        </div>
+    </div>
+));
+
+
+const QuestionList: React.FC<QuestionListProps> = React.memo(({ questions, onEdit, onDelete, onDeleteSet, onEditSet }) => {
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -58,17 +107,30 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         if (timeCompare !== 0) return timeCompare;
         return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true });
     }));
-    
-    if (groups.size > 0 && openFolders.size === 0 && !searchTerm) {
-        setOpenFolders(new Set([groups.keys().next().value]));
-    } else if (searchTerm && groups.size > 0) {
-        setOpenFolders(new Set(groups.keys()));
-    }
 
     return new Map([...groups.entries()].sort());
-  }, [filteredQuestions, searchTerm]);
+  }, [filteredQuestions]);
 
-  const toggleFolder = (codePrefix: string) => {
+  // Performance optimization: Derived state for open folders during search
+  // avoids triggering multiple render cycles via state updates in useMemo.
+  const effectiveOpenFolders = useMemo(() => {
+      if (searchTerm.trim()) {
+          return new Set(groupedQuestions.keys());
+      }
+      return openFolders;
+  }, [searchTerm, groupedQuestions, openFolders]);
+
+  // Initialize first folder as open only when questions load
+  useEffect(() => {
+      if (groupedQuestions.size > 0 && openFolders.size === 0 && !searchTerm) {
+          const firstFolder = groupedQuestions.keys().next().value;
+          if (firstFolder) {
+              setOpenFolders(new Set([firstFolder]));
+          }
+      }
+  }, [groupedQuestions, searchTerm]);
+
+  const toggleFolder = useCallback((codePrefix: string) => {
     setOpenFolders(prev => {
         const newSet = new Set(prev);
         if (newSet.has(codePrefix)) {
@@ -78,22 +140,22 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         }
         return newSet;
     });
-  };
+  }, []);
 
-  const handleDeleteFolder = (e: React.MouseEvent, codePrefix: string, folderQuestions: Question[]) => {
+  const handleDeleteFolder = useCallback((e: React.MouseEvent, codePrefix: string, folderQuestions: Question[]) => {
       e.stopPropagation();
       if (window.confirm(`Are you sure you want to delete the entire "${codePrefix}" set? This will remove ${folderQuestions.length} questions.`)) {
           const ids = folderQuestions.map(q => q.id);
           onDeleteSet(ids);
       }
-  };
+  }, [onDeleteSet]);
 
-  const handleBatchEdit = (e: React.MouseEvent, codePrefix: string, folderQuestions: Question[]) => {
+  const handleBatchEdit = useCallback((e: React.MouseEvent, codePrefix: string, folderQuestions: Question[]) => {
       e.stopPropagation();
       if (onEditSet) {
           onEditSet(codePrefix, folderQuestions);
       }
-  };
+  }, [onEditSet]);
 
   return (
     <div className="space-y-4">
@@ -120,7 +182,7 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
            </div>
        ) : (
            Array.from(groupedQuestions.entries()).map(([codePrefix, folderQuestions]) => {
-               const isOpen = openFolders.has(codePrefix);
+               const isOpen = effectiveOpenFolders.has(codePrefix);
                const firstQ = folderQuestions[0];
                const level = firstQ.level;
                const examName = firstQ.name || 'Uncategorized';
@@ -178,46 +240,12 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
                        {isOpen && (
                            <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
                                {folderQuestions.map((q) => (
-                                   <div key={q.id} className="p-4 border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-white dark:hover:bg-slate-800 transition-colors group flex gap-4">
-                                       <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <span className="text-[10px] font-bold uppercase bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-600">{q.code}</span>
-                                                {q.subtopic && q.subtopic !== 'General' && (
-                                                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-1.5 py-0.5 rounded">
-                                                        {q.subtopic}
-                                                    </span>
-                                                )}
-                                                {q.correct_answer_index === -1 && (
-                                                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                                        <Icon name="lightning" className="w-3 h-3"/> Unsolved
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <p className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 leading-relaxed">
-                                                {q.question}
-                                            </p>
-                                            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
-                                                {q.correct_answer_index !== -1 
-                                                    ? `Ans: ${q.options[q.correct_answer_index]}`
-                                                    : <span className="text-amber-500">Answer needed</span>
-                                                }
-                                            </div>
-                                       </div>
-                                       <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-center">
-                                            <button 
-                                                onClick={() => onEdit(q)} 
-                                                className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 shadow-sm"
-                                            >
-                                                <Icon name="pencil" className="w-4 h-4" />
-                                            </button>
-                                            <button 
-                                                onClick={() => onDelete(q.id)} 
-                                                className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 shadow-sm"
-                                            >
-                                                <Icon name="trash" className="w-4 h-4" />
-                                            </button>
-                                       </div>
-                                   </div>
+                                   <QuestionListItem
+                                        key={q.id}
+                                        q={q}
+                                        onEdit={onEdit}
+                                        onDelete={onDelete}
+                                    />
                                ))}
                            </div>
                        )}
@@ -227,6 +255,6 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
        )}
     </div>
   );
-};
+});
 
 export default QuestionList;
