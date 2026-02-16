@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Question, QuestionLevel } from '../types';
 import Icon from './Icon';
 
@@ -25,10 +25,65 @@ const levelColorMap: Record<QuestionLevel, string> = {
 
 const getCodePrefix = (code: string | undefined) => code ? code.split('-').slice(0, -1).join('-') || code.split('-')[0] : 'Uncategorized';
 
+interface QuestionListItemProps {
+    question: Question;
+    onEdit: (question: Question) => void;
+    onDelete: (id: string) => void;
+}
 
-const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete, onDeleteSet, onEditSet }) => {
+const QuestionListItem: React.FC<QuestionListItemProps> = React.memo(({ question: q, onEdit, onDelete }) => {
+    return (
+        <div className="p-4 border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-white dark:hover:bg-slate-800 transition-colors group flex gap-4">
+            <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] font-bold uppercase bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-600">{q.code}</span>
+                    {q.subtopic && q.subtopic !== 'General' && (
+                        <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-1.5 py-0.5 rounded">
+                            {q.subtopic}
+                        </span>
+                    )}
+                    {q.correct_answer_index === -1 && (
+                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded flex items-center gap-1">
+                            <Icon name="lightning" className="w-3 h-3"/> Unsolved
+                        </span>
+                    )}
+                </div>
+                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 leading-relaxed">
+                    {q.question}
+                </p>
+                <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                    {q.correct_answer_index !== -1
+                        ? `Ans: ${q.options[q.correct_answer_index]}`
+                        : <span className="text-amber-500">Answer needed</span>
+                    }
+                </div>
+            </div>
+            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-center">
+                <button
+                    onClick={() => onEdit(q)}
+                    className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 shadow-sm"
+                >
+                    <Icon name="pencil" className="w-4 h-4" />
+                </button>
+                <button
+                    onClick={() => onDelete(q.id)}
+                    className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 shadow-sm"
+                >
+                    <Icon name="trash" className="w-4 h-4" />
+                </button>
+            </div>
+        </div>
+    );
+});
+
+QuestionListItem.displayName = 'QuestionListItem';
+
+
+const QuestionList: React.FC<QuestionListProps> = React.memo(({ questions, onEdit, onDelete, onDeleteSet, onEditSet }) => {
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [prevSearchTerm, setPrevSearchTerm] = useState('');
+  const [hasInitialized, setHasInitialized] = useState(false);
 
   const filteredQuestions = useMemo(() => {
     if (!searchTerm.trim()) return questions;
@@ -59,14 +114,25 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
         return (a.code || '').localeCompare(b.code || '', undefined, { numeric: true });
     }));
     
-    if (groups.size > 0 && openFolders.size === 0 && !searchTerm) {
-        setOpenFolders(new Set([groups.keys().next().value]));
-    } else if (searchTerm && groups.size > 0) {
-        setOpenFolders(new Set(groups.keys()));
-    }
-
     return new Map([...groups.entries()].sort());
-  }, [filteredQuestions, searchTerm]);
+  }, [filteredQuestions]);
+
+  // Adjust state during render to avoid flicker and extra render cycles
+  // This is the recommended pattern for adjusting state based on props/other state changes
+  if (searchTerm !== prevSearchTerm) {
+    setPrevSearchTerm(searchTerm);
+    if (searchTerm && groupedQuestions.size > 0) {
+        setOpenFolders(new Set(groupedQuestions.keys()));
+    }
+  }
+
+  // Handle initial folder expansion on load
+  useEffect(() => {
+    if (!hasInitialized && groupedQuestions.size > 0 && !searchTerm) {
+        setHasInitialized(true);
+        setOpenFolders(new Set([groupedQuestions.keys().next().value]));
+    }
+  }, [groupedQuestions, searchTerm, hasInitialized]);
 
   const toggleFolder = (codePrefix: string) => {
     setOpenFolders(prev => {
@@ -178,46 +244,12 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
                        {isOpen && (
                            <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
                                {folderQuestions.map((q) => (
-                                   <div key={q.id} className="p-4 border-b border-slate-100 dark:border-slate-800 last:border-0 hover:bg-white dark:hover:bg-slate-800 transition-colors group flex gap-4">
-                                       <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <span className="text-[10px] font-bold uppercase bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-600">{q.code}</span>
-                                                {q.subtopic && q.subtopic !== 'General' && (
-                                                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-1.5 py-0.5 rounded">
-                                                        {q.subtopic}
-                                                    </span>
-                                                )}
-                                                {q.correct_answer_index === -1 && (
-                                                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                                        <Icon name="lightning" className="w-3 h-3"/> Unsolved
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <p className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 leading-relaxed">
-                                                {q.question}
-                                            </p>
-                                            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
-                                                {q.correct_answer_index !== -1 
-                                                    ? `Ans: ${q.options[q.correct_answer_index]}`
-                                                    : <span className="text-amber-500">Answer needed</span>
-                                                }
-                                            </div>
-                                       </div>
-                                       <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-center">
-                                            <button 
-                                                onClick={() => onEdit(q)} 
-                                                className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 shadow-sm"
-                                            >
-                                                <Icon name="pencil" className="w-4 h-4" />
-                                            </button>
-                                            <button 
-                                                onClick={() => onDelete(q.id)} 
-                                                className="p-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 shadow-sm"
-                                            >
-                                                <Icon name="trash" className="w-4 h-4" />
-                                            </button>
-                                       </div>
-                                   </div>
+                                   <QuestionListItem
+                                        key={q.id}
+                                        question={q}
+                                        onEdit={onEdit}
+                                        onDelete={onDelete}
+                                    />
                                ))}
                            </div>
                        )}
@@ -227,6 +259,8 @@ const QuestionList: React.FC<QuestionListProps> = ({ questions, onEdit, onDelete
        )}
     </div>
   );
-};
+});
+
+QuestionList.displayName = 'QuestionList';
 
 export default QuestionList;
