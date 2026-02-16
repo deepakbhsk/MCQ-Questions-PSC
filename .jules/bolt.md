@@ -1,0 +1,3 @@
+## 2025-05-15 - [State Synchronization Anti-pattern]
+**Learning:** Calling `setState` inside `useMemo` is a significant performance anti-pattern that triggers extra render cycles and violates React's pure computation principles. For adjusting state based on props/state changes, the "adjust state during render" pattern (tracking `prevProps`) is more efficient as it avoids a full render cycle flicker.
+**Action:** Always check for `setState` calls inside `useMemo` or during the render body. Prefer deriving state or using the `prevProps` pattern during render for immediate synchronization without extra cycles.
