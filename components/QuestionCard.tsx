@@ -21,7 +21,7 @@ interface QuestionCardProps {
   onToggleBookmark?: () => void;
 }
 
-const QuestionCard: React.FC<QuestionCardProps> = ({ 
+const QuestionCard: React.FC<QuestionCardProps> = React.memo(({
     question, 
     mode, 
     userSelectedOption, 
@@ -365,6 +365,6 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default QuestionCard;

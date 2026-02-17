@@ -15,6 +15,24 @@ interface QuizProps {
 type ViewState = 'intro' | 'home' | 'level' | 'exam' | 'set' | 'quiz' | 'score' | 'topic_list' | 'topic_set' | 'bookmark_set' | 'study_generator' | 'study_prep' | 'topic_library' | 'topic_library_sub' | 'topic_library_specific';
 type NavTab = 'dashboard' | 'subjects' | 'bookmarks';
 
+// Internal Timer component to localize re-renders
+const Timer: React.FC<{ startTime: number }> = ({ startTime }) => {
+  const [elapsed, setElapsed] = React.useState(0);
+
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [startTime]);
+
+  return (
+    <div className="px-3 py-1 bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-800 text-xs font-mono font-bold text-stone-600 dark:text-stone-400 tabular-nums shadow-sm">
+      {Math.floor(elapsed / 60)}:{(elapsed % 60).toString().padStart(2, '0')}
+    </div>
+  );
+};
+
 // Polished, less neon colors for the levels
 const levelVisuals: Record<QuestionLevel, { icon: React.ComponentProps<typeof Icon>['name'], color: string, bg: string, border: string }> = {
     [QuestionLevel.SEVENTH]: { icon: 'bookOpen', color: 'text-orange-700 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-900/10', border: 'border-orange-200 dark:border-orange-800' },
@@ -75,15 +93,6 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
     localStorage.setItem(`bookmarks_${userId}`, JSON.stringify(Array.from(bookmarkedQuestionIds)));
   }, [bookmarkedQuestionIds, userId]);
 
-  useEffect(() => {
-    let interval: number;
-    if (view === 'quiz' && startTime > 0) {
-      interval = window.setInterval(() => {
-        setTimeTaken(Math.floor((Date.now() - startTime) / 1000));
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [view, startTime]);
 
   useEffect(() => {
     if (view === 'study_prep' && customQuiz?.notes && notesRef.current && (window as any).renderMathInElement) {
@@ -219,54 +228,11 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
       startQuizSession();
   };
 
-  const handleAnswer = (optionIndex: number) => {
-    const currentQ = quizQuestions[currentQuestionIndex];
-    if (userAnswers[currentQ.id] !== undefined) return;
-    setUserAnswers(prev => ({ ...prev, [currentQ.id]: optionIndex }));
-  };
+  const handleSubmit = React.useCallback(() => {
+    // Capture final time once on submission
+    const finalTimeTaken = Math.floor((Date.now() - startTime) / 1000);
+    setTimeTaken(finalTimeTaken);
 
-  const handleNext = () => {
-    if (currentQuestionIndex < quizQuestions.length - 1) {
-      setCurrentQuestionIndex(prev => prev + 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-        handleSubmit();
-    }
-  };
-
-  const handlePrevious = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(prev => prev - 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
-  
-  const handleSaveNext = () => {
-      handleNext();
-  };
-
-  const handleClearResponse = () => {
-      const currentQ = quizQuestions[currentQuestionIndex];
-      const newAnswers = { ...userAnswers };
-      delete newAnswers[currentQ.id];
-      setUserAnswers(newAnswers);
-  };
-  
-  const handleMarkForReview = () => {
-  };
-
-  const toggleBookmark = () => {
-    const currentQ = quizQuestions[currentQuestionIndex];
-    const newBookmarks = new Set(bookmarkedQuestionIds);
-    if (newBookmarks.has(currentQ.id)) {
-      newBookmarks.delete(currentQ.id);
-    } else {
-      newBookmarks.add(currentQ.id);
-    }
-    setBookmarkedQuestionIds(newBookmarks);
-  };
-
-  const handleSubmit = () => {
     let calculatedScore = 0;
     const incorrect: IncorrectAnswer[] = [];
 
@@ -287,7 +253,60 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
     setIncorrectAnswers(incorrect);
     setView('score');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [startTime, quizQuestions, userAnswers]);
+
+  const handleAnswer = React.useCallback((optionIndex: number) => {
+    setUserAnswers(prev => {
+        const currentQ = quizQuestions[currentQuestionIndex];
+        if (prev[currentQ.id] !== undefined) return prev;
+        return { ...prev, [currentQ.id]: optionIndex };
+    });
+  }, [quizQuestions, currentQuestionIndex]);
+
+  const handleNext = React.useCallback(() => {
+    if (currentQuestionIndex < quizQuestions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+        handleSubmit();
+    }
+  }, [quizQuestions, currentQuestionIndex, handleSubmit]);
+
+  const handlePrevious = React.useCallback(() => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex(prev => prev - 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentQuestionIndex]);
+
+  const handleSaveNext = React.useCallback(() => {
+      handleNext();
+  }, [handleNext]);
+
+  const handleClearResponse = React.useCallback(() => {
+      setUserAnswers(prev => {
+          const currentQ = quizQuestions[currentQuestionIndex];
+          const newAnswers = { ...prev };
+          delete newAnswers[currentQ.id];
+          return newAnswers;
+      });
+  }, [quizQuestions, currentQuestionIndex]);
+
+  const handleMarkForReview = React.useCallback(() => {
+  }, []);
+
+  const toggleBookmark = React.useCallback(() => {
+    setBookmarkedQuestionIds(prev => {
+        const currentQ = quizQuestions[currentQuestionIndex];
+        const newSet = new Set(prev);
+        if (newSet.has(currentQ.id)) {
+            newSet.delete(currentQ.id);
+        } else {
+            newSet.add(currentQ.id);
+        }
+        return newSet;
+    });
+  }, [quizQuestions, currentQuestionIndex]);
 
   const handleRestart = () => {
     setUserAnswers({});
@@ -299,11 +318,11 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
     setView('quiz');
   };
 
-  const handleExit = () => {
+  const handleExit = React.useCallback(() => {
       setView('home');
       setPath({ mode: null, level: null, exam: null, subtopic: null, chunkIndex: null });
       setCustomQuiz(null);
-  };
+  }, []);
 
   const renderLevelView = () => {
     if (!path.level) return null;
@@ -443,9 +462,7 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
                        </div>
                    </div>
                    <div className="flex items-center gap-3">
-                       <div className="px-3 py-1 bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-800 text-xs font-mono font-bold text-stone-600 dark:text-stone-400 tabular-nums shadow-sm">
-                            {Math.floor(timeTaken / 60)}:{(timeTaken % 60).toString().padStart(2, '0')}
-                       </div>
+                       <Timer startTime={startTime} />
                    </div>
               </div>
 
