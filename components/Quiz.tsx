@@ -6,6 +6,7 @@ import Icon from './Icon';
 import { getRandomQuote, Quote } from '../quotes';
 import Spinner from './Spinner';
 import StudyGenerator from './StudyGenerator';
+import Timer from './Timer';
 
 interface QuizProps {
   questions: Question[];
@@ -75,15 +76,6 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
     localStorage.setItem(`bookmarks_${userId}`, JSON.stringify(Array.from(bookmarkedQuestionIds)));
   }, [bookmarkedQuestionIds, userId]);
 
-  useEffect(() => {
-    let interval: number;
-    if (view === 'quiz' && startTime > 0) {
-      interval = window.setInterval(() => {
-        setTimeTaken(Math.floor((Date.now() - startTime) / 1000));
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [view, startTime]);
 
   useEffect(() => {
     if (view === 'study_prep' && customQuiz?.notes && notesRef.current && (window as any).renderMathInElement) {
@@ -270,6 +262,9 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
     let calculatedScore = 0;
     const incorrect: IncorrectAnswer[] = [];
 
+    // Set final time taken exactly once
+    setTimeTaken(Math.floor((Date.now() - startTime) / 1000));
+
     quizQuestions.forEach(q => {
       const userAnswer = userAnswers[q.id];
       const correctIndex = typeof q.correct_answer_index === 'string' 
@@ -443,9 +438,7 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
                        </div>
                    </div>
                    <div className="flex items-center gap-3">
-                       <div className="px-3 py-1 bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-800 text-xs font-mono font-bold text-stone-600 dark:text-stone-400 tabular-nums shadow-sm">
-                            {Math.floor(timeTaken / 60)}:{(timeTaken % 60).toString().padStart(2, '0')}
-                       </div>
+                       <Timer startTime={startTime} />
                    </div>
               </div>
 

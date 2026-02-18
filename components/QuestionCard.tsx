@@ -367,4 +367,4 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
   );
 };
 
-export default QuestionCard;
+export default React.memo(QuestionCard);
