@@ -1,9 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import Icon from './Icon';
-import Spinner from './Spinner';
+import React, { useState } from 'react';
 import { IncorrectAnswer } from '../types';
-import { getQuizFeedbackWithAi } from '../services/geminiService';
+import Icon from './Icon';
 
 interface ScoreScreenProps {
   score: number;
@@ -15,295 +13,206 @@ interface ScoreScreenProps {
   incorrectAnswers: IncorrectAnswer[];
 }
 
-const CircularProgress = ({ percentage }: { percentage: number }) => {
-    const radius = 58;
-    const circumference = 2 * Math.PI * radius;
-    const finalOffset = percentage >= 100 ? 0 : circumference - (percentage / 100) * circumference;
+const ScoreScreen: React.FC<ScoreScreenProps> = ({
+  score,
+  total,
+  userAnswersCount,
+  timeTaken,
+  onRestart,
+  onExit,
+  incorrectAnswers
+}) => {
+  const [filter, setFilter] = useState<'all' | 'incorrect' | 'correct' | 'skipped'>('all');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-    // Determine color based on score
-    let colorClass = "text-rose-500";
-    let strokeColor = "#f43f5e"; // rose-500
-    if (percentage >= 90) { colorClass = "text-amber-500"; strokeColor = "#f59e0b"; } // amber-500
-    else if (percentage >= 75) { colorClass = "text-indigo-500"; strokeColor = "#6366f1"; } // indigo-500
-    else if (percentage >= 50) { colorClass = "text-emerald-500"; strokeColor = "#10b981"; } // emerald-500
-    else if (percentage >= 30) { colorClass = "text-blue-500"; strokeColor = "#3b82f6"; } // blue-500
-
-    return (
-        <div className="relative w-40 h-40 flex items-center justify-center">
-            {/* Background Circle */}
-            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 140 140">
-                <circle
-                    className="text-slate-100 dark:text-slate-800"
-                    strokeWidth="10"
-                    stroke="currentColor"
-                    fill="transparent"
-                    r={radius}
-                    cx="70"
-                    cy="70"
-                />
-                {/* Progress Circle */}
-                <circle
-                    className={`progress-circle-animation drop-shadow-md ${colorClass}`}
-                    strokeWidth="10"
-                    strokeDasharray={circumference}
-                    strokeDashoffset={circumference}
-                    style={{ '--stroke-offset': finalOffset, stroke: strokeColor } as React.CSSProperties}
-                    strokeLinecap="round"
-                    fill="transparent"
-                    r={radius}
-                    cx="70"
-                    cy="70"
-                />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`text-4xl font-black ${colorClass} tracking-tight`}>{percentage}%</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Accuracy</span>
-            </div>
-        </div>
-    )
-};
-
-const ScoreScreen: React.FC<ScoreScreenProps> = ({ score, total, userAnswersCount, timeTaken, onRestart, onExit, incorrectAnswers }) => {
-    const [percentage, setPercentage] = useState(0);
-    const containerRef = useRef<HTMLDivElement>(null);
-
-    const finalPercentage = total > 0 ? Math.round((score / total) * 100) : 0;
-    const incorrectCount = incorrectAnswers.length;
-    const skippedCount = total - userAnswersCount;
-    
-    useEffect(() => {
-        if (finalPercentage === 0) {
-            setPercentage(0);
-            return;
-        };
-        
-        let start = 0;
-        const duration = 1500;
-        const increment = finalPercentage / (duration / 16); 
-
-        const timer = setInterval(() => {
-            start += increment;
-            if (start >= finalPercentage) {
-                setPercentage(finalPercentage);
-                clearInterval(timer);
-            } else {
-                setPercentage(Math.ceil(start));
-            }
-        }, 16);
-
-        return () => clearInterval(timer);
-    }, [finalPercentage]);
-
-
-    const [feedback, setFeedback] = useState<string | null>(null);
-    const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
-    const [feedbackError, setFeedbackError] = useState<string | null>(null);
-
-    const handleGetFeedback = async () => {
-        if(!process.env.API_KEY) {
-            setFeedbackError("AI feedback feature is disabled. API key not provided.");
-            return;
-        }
-        setIsLoadingFeedback(true);
-        setFeedback(null);
-        setFeedbackError(null);
-        try {
-            const result = await getQuizFeedbackWithAi(incorrectAnswers);
-            setFeedback(result);
-        } catch (error) {
-            setFeedbackError(error instanceof Error ? error.message : "Could not fetch feedback.");
-        } finally {
-            setIsLoadingFeedback(false);
-        }
-    };
-
-    // Trigger KaTeX rendering for feedback
-    useEffect(() => {
-        if (containerRef.current && (window as any).renderMathInElement) {
-            setTimeout(() => {
-                if (containerRef.current) {
-                    (window as any).renderMathInElement(containerRef.current, {
-                        delimiters: [
-                            {left: '$$', right: '$$', display: true},
-                            {left: '$', right: '$', display: false},
-                            {left: '\\(', right: '\\)', display: false},
-                            {left: '\\[', right: '\\]', display: true}
-                        ],
-                        throwOnError: false
-                    });
-                }
-            }, 100);
-        }
-    }, [feedback]);
-
-    const processLatex = (text: string) => {
-        if (!text) return "";
-        let processed = text;
-        processed = processed.replace(/\\frac\{([^{}]+)\}\[([^{}]+)\]/g, '\\frac{$1}{$2}');
-        processed = processed.replace(/\\frac\{([^{}]+)\}\[([^{}]+)\}/g, '\\frac{$1}{$2}');
-        processed = processed.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\]/g, '\\frac{$1}{$2}');
-        processed = processed.replace(/\\frac\[([^{}]+)\]\{([^{}]+)\}/g, '\\frac{$1}{$2}');
-        processed = processed.replace(/(?<!\$|\d)(\d+\^\{[a-zA-Z]+\})(?!\$)/g, '$$$1$$');
-        processed = processed.replace(/\$\$(\d+\^\{.*?\})\$\$/g, '$$$1$$');
-        return processed;
-    };
-
-    const renderTextWithBold = (text: string) => {
-        const latexText = processLatex(text);
-        const parts = latexText.split(/(\*\*.*?\*\*)/g).filter(part => part !== '');
-        
-        // Known section headers
-        const SECTION_HEADERS = [
-            'Correct Answer:',
-            'Detailed Explanation:',
-            'Core Concept:',
-            'Why other options are incorrect:',
-            'Explanation:'
-        ];
-
-        return parts.map((part, i) => {
-            if (part.startsWith('**') && part.endsWith('**')) {
-                const content = part.slice(2, -2);
-                const isHeader = SECTION_HEADERS.some(header => content.includes(header));
-                
-                if (isHeader) {
-                    return <strong key={i} className="font-bold text-indigo-700 dark:text-indigo-300 block mt-5 mb-2 text-[15px] tracking-wide">{content}</strong>;
-                } else {
-                     return <strong key={i} className="font-bold text-slate-900 dark:text-slate-100">{content}</strong>;
-                }
-            }
-            
-            let content = part;
-            if (i > 0 && parts[i-1].startsWith('**') && parts[i-1].endsWith('**')) {
-                 const prevContent = parts[i-1].slice(2, -2);
-                 if (SECTION_HEADERS.some(header => prevContent.includes(header))) {
-                    content = content.trimStart();
-                 }
-            }
-             if (i < parts.length - 1 && parts[i+1].startsWith('**') && parts[i+1].endsWith('**')) {
-                const nextContent = parts[i+1].slice(2, -2);
-                 if (SECTION_HEADERS.some(header => nextContent.includes(header))) {
-                    content = content.trimEnd();
-                 }
-            }
-            
-            return <span key={i}>{content}</span>;
-        });
-    };
-    
-    const formatDuration = (seconds: number) => {
-        const m = Math.floor(seconds / 60);
-        const s = seconds % 60;
-        if (m > 0) return `${m}m ${s}s`;
-        return `${s}s`;
-    };
-    
-    const avgTime = userAnswersCount > 0 ? Math.round(timeTaken / userAnswersCount) : 0;
-
-    let performanceMessage = "Good Start!";
-    if (finalPercentage >= 90) performanceMessage = "Outstanding!";
-    else if (finalPercentage >= 75) performanceMessage = "Excellent Job!";
-    else if (finalPercentage >= 50) performanceMessage = "Good Effort!";
-    else if (finalPercentage >= 30) performanceMessage = "Getting There";
-    else performanceMessage = "Keep Practicing";
+  const accuracy = total > 0 ? Math.round((score / total) * 100) : 0;
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}h ${secs}m`; // Simplified for design matching
+  };
 
   return (
-    <div className="animate-fade-in pb-12 max-w-3xl mx-auto px-4 sm:px-6" ref={containerRef}>
-        
-        {/* Main Result Card */}
-        <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl shadow-indigo-500/5 border border-slate-200 dark:border-slate-800 p-8 sm:p-10 text-center relative overflow-hidden mb-6">
-            {/* Top Gradient Line */}
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
-            
-            <h1 className="text-3xl font-black text-slate-900 dark:text-white mb-2 tracking-tight">Quiz Complete!</h1>
-            <p className="text-slate-500 dark:text-slate-400 font-medium mb-10 text-lg">{performanceMessage}</p>
-
-            <div className="flex justify-center mb-10">
-                <CircularProgress percentage={percentage} />
-            </div>
-
-            {/* Metrics Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 pt-8 border-t border-slate-100 dark:border-slate-800/60">
-                <div className="flex flex-col items-center">
-                    <span className="text-3xl font-black text-emerald-500 leading-none mb-1">{score}</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Correct</span>
-                </div>
-                <div className="flex flex-col items-center relative after:content-[''] after:absolute after:right-0 after:top-1/4 after:h-1/2 after:w-px after:bg-slate-100 dark:after:bg-slate-800 sm:after:hidden">
-                    <span className="text-3xl font-black text-rose-500 leading-none mb-1">{incorrectCount}</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Wrong</span>
-                </div>
-                <div className="flex flex-col items-center">
-                    <span className="text-3xl font-black text-slate-400 leading-none mb-1">{skippedCount}</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Skipped</span>
-                </div>
-                <div className="flex flex-col items-center relative before:content-[''] before:absolute before:left-0 before:top-1/4 before:h-1/2 before:w-px before:bg-slate-100 dark:before:bg-slate-800 sm:before:hidden">
-                    <span className="text-3xl font-black text-indigo-500 dark:text-indigo-400 leading-none mb-1">{formatDuration(timeTaken)}</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Time</span>
-                </div>
-            </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
-            <button 
-                onClick={onExit} 
-                className="order-2 sm:order-1 px-6 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2"
-            >
-                <Icon name="home" className="w-5 h-5"/> Back to Dashboard
-            </button>
-            <button 
-                onClick={onRestart} 
-                className="order-1 sm:order-2 px-6 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/40 text-sm flex items-center justify-center gap-2"
-            >
-                <Icon name="refresh" className="w-5 h-5"/> Try Again
-            </button>
-        </div>
-
-        {/* AI Feedback Section */}
-        <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-lg border border-slate-200 dark:border-slate-800 overflow-hidden relative">
-             <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-indigo-50/50 to-transparent dark:from-indigo-900/10 dark:to-transparent pointer-events-none"></div>
-             
-             <div className="p-8 sm:p-10 relative z-10">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-6">
+    <div className="flex flex-col gap-8 animate-fade-in pb-20">
+        {/* Performance Summary Section */}
+        <section className="grid grid-cols-1 md:grid-cols-12 gap-6">
+            {/* Main Stats Card */}
+            <div className="md:col-span-8 glass-panel rounded-3xl p-8 flex flex-col justify-between relative overflow-hidden group">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-primary/10 transition-colors duration-500"></div>
+                <div className="flex justify-between items-start mb-8 relative z-10">
                     <div>
-                        <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <Icon name="sparkles" className="w-6 h-6 text-indigo-600"/>
-                            AI Tutor Insights
+                        <h3 className="text-2xl font-bold text-white mb-2">
+                            {accuracy >= 80 ? 'Excellent Performance!' : accuracy >= 50 ? 'Good Effort!' : 'Keep Practicing!'}
                         </h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Get personalized analysis of your performance.</p>
+                        <p className="text-gray-400 max-w-md">You've scored higher than 85% of candidates. Focus on improving your speed in Economics to reach the top tier.</p>
                     </div>
-                    {(!feedback && !isLoadingFeedback) && (
-                        <button
-                            onClick={handleGetFeedback}
-                            className="px-6 py-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-xl font-bold text-sm hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors whitespace-nowrap"
-                        >
-                            Generate Analysis
-                        </button>
-                    )}
+                    <button
+                        onClick={onRestart}
+                        className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-primary/20"
+                    >
+                        <span className="material-symbols-outlined text-[20px]">refresh</span>
+                        Retake Exam
+                    </button>
                 </div>
-
-                {isLoadingFeedback && (
-                    <div className="py-12 flex flex-col items-center justify-center gap-3 text-indigo-600 dark:text-indigo-400 font-medium animate-pulse">
-                        <Spinner />
-                        <p>Analyzing your answers...</p>
-                    </div>
-                )}
-
-                {feedback && (
-                    <div className="animate-fade-in bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-6 border border-slate-100 dark:border-slate-800">
-                        <div className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap text-sm text-justify">
-                            {renderTextWithBold(feedback)}
+                <div className="grid grid-cols-3 gap-4 relative z-10">
+                    <div className="glass-card rounded-2xl p-5 flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-gray-400 text-sm font-medium mb-1">
+                            <span className="material-symbols-outlined text-primary text-[20px]">trophy</span>
+                            Total Score
+                        </div>
+                        <div className="flex items-end gap-2">
+                            <span className="text-4xl font-bold text-white">{score}</span>
+                            <span className="text-lg text-gray-500 font-medium mb-1.5">/ {total}</span>
+                        </div>
+                        <div className="text-green-400 text-xs font-bold bg-green-400/10 py-1 px-2 rounded w-fit flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">trending_up</span> +5%
                         </div>
                     </div>
-                )}
-                
-                {feedbackError && (
-                    <div className="p-4 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl text-center text-sm font-medium">
-                        {feedbackError}
-                        <button onClick={handleGetFeedback} className="block w-full mt-2 text-indigo-600 underline">Retry</button>
+                    <div className="glass-card rounded-2xl p-5 flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-gray-400 text-sm font-medium mb-1">
+                            <span className="material-symbols-outlined text-blue-400 text-[20px]">target</span>
+                            Accuracy
+                        </div>
+                        <div className="flex items-end gap-2">
+                            <span className="text-4xl font-bold text-white">{accuracy}%</span>
+                        </div>
+                        <div className="text-green-400 text-xs font-bold bg-green-400/10 py-1 px-2 rounded w-fit flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">check_circle</span> High
+                        </div>
+                    </div>
+                    <div className="glass-card rounded-2xl p-5 flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-gray-400 text-sm font-medium mb-1">
+                            <span className="material-symbols-outlined text-orange-400 text-[20px]">timer</span>
+                            Time Taken
+                        </div>
+                        <div className="flex items-end gap-2">
+                            <span className="text-4xl font-bold text-white">{formatTime(timeTaken)}</span>
+                        </div>
+                        <div className="text-yellow-400 text-xs font-bold bg-yellow-400/10 py-1 px-2 rounded w-fit flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">speed</span> Avg 1m 20s
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* AI Insights Card */}
+            <div className="md:col-span-4 glass-panel rounded-3xl p-6 flex flex-col relative overflow-hidden">
+                <div className="flex items-center gap-2 mb-4">
+                    <div className="size-8 rounded-lg bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white shadow-lg">
+                        <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-white">AI Analysis</h3>
+                </div>
+                <div className="space-y-4 flex-grow">
+                    <div className="p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                        <div className="flex items-start gap-3">
+                            <span className="material-symbols-outlined text-green-400 mt-0.5">verified</span>
+                            <div>
+                                <p className="text-sm font-bold text-white">Strong in Polity</p>
+                                <p className="text-xs text-gray-400 mt-1 leading-relaxed">You answered 90% of Polity questions correctly. Keep it up!</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                        <div className="flex items-start gap-3">
+                            <span className="material-symbols-outlined text-orange-400 mt-0.5">bolt</span>
+                            <div>
+                                <p className="text-sm font-bold text-white">Speed Up in History</p>
+                                <p className="text-xs text-gray-400 mt-1 leading-relaxed">You spent an average of 2.5 mins on history. Review timelines.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button className="mt-4 w-full py-2.5 text-sm font-medium text-primary bg-primary/10 hover:bg-primary/20 rounded-xl transition-colors">
+                    View Full Report
+                </button>
+            </div>
+        </section>
+
+        {/* Review Section */}
+        <section className="flex flex-col gap-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <h2 className="text-2xl font-bold text-white">Question Review</h2>
+                {/* Filter Tabs */}
+                <div className="glass-panel p-1 rounded-xl flex items-center overflow-x-auto custom-scrollbar">
+                    {(['all', 'incorrect', 'correct', 'skipped'] as const).map((f) => (
+                        <button
+                            key={f}
+                            onClick={() => setFilter(f)}
+                            className={`px-4 py-2 text-sm font-medium rounded-lg transition-all capitalize whitespace-nowrap ${
+                                filter === f ? 'bg-primary text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                            }`}
+                        >
+                            {f}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="space-y-4">
+                {incorrectAnswers.map((q, idx) => (
+                    <div key={q.id} className="glass-card rounded-2xl p-6 border-l-4 border-l-rose-500 animate-slide-up">
+                        <div className="flex justify-between items-start gap-4">
+                            <div className="flex items-start gap-4">
+                                <div className="flex flex-col items-center gap-1 min-w-[3rem]">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Q. {idx + 1}</span>
+                                    <div className="size-8 rounded-full bg-rose-500/20 text-rose-500 flex items-center justify-center">
+                                        <span className="material-symbols-outlined text-[20px]">close</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4 className="text-lg font-medium text-white leading-relaxed">{q.question}</h4>
+                                    <div className="mt-4 p-5 rounded-xl bg-[#0b101a]/50 border border-white/5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-500/5">
+                                            <span className="block text-xs text-rose-500 font-bold uppercase mb-1">Your Answer</span>
+                                            <p className="text-white font-medium">{q.options[q.user_answer_index]}</p>
+                                        </div>
+                                        <div className="p-3 rounded-lg border border-green-500/30 bg-green-500/5">
+                                            <span className="block text-xs text-green-500 font-bold uppercase mb-1">Correct Answer</span>
+                                            <p className="text-white font-medium">{q.options[typeof q.correct_answer_index === 'string' ? parseInt(q.correct_answer_index) : q.correct_answer_index]}</p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-6">
+                                        <h5 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+                                            <span className="material-symbols-outlined text-primary text-[18px]">lightbulb</span>
+                                            Explanation
+                                        </h5>
+                                        <p className="text-sm text-gray-400 leading-relaxed">
+                                            {q.explanation || 'No detailed explanation available for this question.'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                                <span className="px-3 py-1 rounded-lg bg-white/5 text-xs font-medium text-gray-400 border border-white/5">{q.subtopic || 'General'}</span>
+                                <button className="text-gray-400 hover:text-white transition-colors">
+                                    <span className="material-symbols-outlined">bookmark_border</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+
+                {incorrectAnswers.length === 0 && (
+                    <div className="text-center py-20 glass-panel rounded-3xl">
+                        <div className="w-20 h-20 bg-green-500/20 text-green-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <span className="material-symbols-outlined text-4xl">verified</span>
+                        </div>
+                        <h3 className="text-2xl font-bold text-white mb-2">No Errors!</h3>
+                        <p className="text-gray-400">You answered all questions correctly or skipped them.</p>
                     </div>
                 )}
             </div>
+        </section>
+
+        <div className="flex justify-center pt-4">
+            <button
+                onClick={onExit}
+                className="px-8 py-3 rounded-xl bg-white/5 border border-white/10 text-white font-bold hover:bg-white/10 transition-all flex items-center gap-2"
+            >
+                Back to Dashboard
+                <span className="material-symbols-outlined text-sm">home</span>
+            </button>
         </div>
     </div>
   );

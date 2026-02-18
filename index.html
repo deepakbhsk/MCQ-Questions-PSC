@@ -4,15 +4,20 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#4f46e5" />
+    <meta name="theme-color" content="#135bec" />
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>PSC MCQ Practice App</title>
+    <title>PSC AI Prep</title>
     <link rel="manifest" href="/manifest.json">
+
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap" rel="stylesheet">
     
+    <!-- Material Symbols -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+
     <!-- KaTeX for LaTeX Rendering -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
@@ -21,15 +26,22 @@
     <!-- SheetJS for Excel Parsing -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r98B5R2nSHyTPWpVI4ToawJ0sNn7ISbOdh3cuya8hc5QJ8BeC1VGCeU0M94ifrd+gl7kG49I55/w/od2+0fL4g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script>
       tailwind.config = {
         darkMode: 'class',
         theme: {
           extend: {
-            fontFamily: {
-              sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            colors: {
+              "primary": "#135bec",
+              "background-light": "#f6f6f8",
+              "background-dark": "#101622",
             },
+            fontFamily: {
+              "display": ["Lexend", "sans-serif"],
+              "sans": ["Lexend", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
             animation: {
               blob: "blob 7s infinite",
             },
@@ -64,31 +76,59 @@
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out forwards;
 }
+
+/* Custom styles for mesh gradient and glassmorphism */
+.mesh-gradient {
+    background-color: #101622;
+    background-image:
+        radial-gradient(at 0% 0%, hsla(220, 65%, 21%, 1) 0, transparent 50%),
+        radial-gradient(at 50% 0%, hsla(222, 85%, 47%, 0.4) 0, transparent 50%),
+        radial-gradient(at 100% 0%, hsla(263, 70%, 45%, 0.3) 0, transparent 50%),
+        radial-gradient(at 100% 100%, hsla(220, 65%, 21%, 1) 0, transparent 50%),
+        radial-gradient(at 0% 100%, hsla(263, 70%, 45%, 0.3) 0, transparent 50%);
+}
+
+.glass-panel {
+    background: rgba(16, 22, 34, 0.4);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-card {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 100%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+}
+
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+  background: #101622;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #a8a29e;
-  border-radius: 20px;
+  background: #232f48;
+  border-radius: 4px;
 }
-.dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #57534e;
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #324467;
 }
 /* Progress Circle Animation */
 .progress-circle-animation {
   transition: stroke-dashoffset 1.5s ease-in-out;
 }
 body {
-  font-family: "Inter", sans-serif;
+  font-family: "Lexend", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 </style>
 </head>
-<body class="bg-[#fcfaf8] dark:bg-[#1c1917] transition-colors duration-300">
+<body class="font-display bg-background-light dark:bg-background-dark text-slate-900 dark:text-white antialiased transition-colors duration-300">
   <div id="root"></div>
   <script type="module" src="index.tsx"></script>
 </body>

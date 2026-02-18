@@ -273,8 +273,6 @@ export const extractRawQuestionsFromText = async (
                 chunks.push(input.substring(i, i + CHUNK_SIZE));
             }
 
-            console.log(`Split text into ${chunks.length} chunks for processing.`);
-
             // Process chunks in parallel (careful with rate limits, but Flash is high throughput)
             const promises = chunks.map((chunk, index) => 
                 processChunk({ text: `Analyze this text segment (Part ${index + 1}): "${chunk}"` }, index)
