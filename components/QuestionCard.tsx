@@ -1,368 +1,214 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Question, QuizMode } from '../types';
-import Icon from './Icon';
-import Spinner from './Spinner';
-import { getExplanationWithAi } from '../services/geminiService';
 
 interface QuestionCardProps {
   question: Question;
   mode: QuizMode;
   userSelectedOption?: number;
-  onAnswer: (selectedIndex: number) => void;
+  onAnswer: (optionIndex: number) => void;
   onNext: () => void;
-  onSaveNext?: () => void;
   onPrevious: () => void;
-  onClearResponse?: () => void;
-  onMarkForReview?: () => void;
+  onSaveNext: () => void;
+  onClearResponse: () => void;
+  onMarkForReview: () => void;
   isFirst: boolean;
   isLast: boolean;
-  isBookmarked?: boolean;
-  onToggleBookmark?: () => void;
+  isBookmarked: boolean;
+  onToggleBookmark: () => void;
 }
 
-const QuestionCard: React.FC<QuestionCardProps> = ({ 
-    question, 
-    mode, 
-    userSelectedOption, 
-    onAnswer, 
-    onNext, 
-    onSaveNext,
-    onPrevious,
-    onClearResponse,
-    onMarkForReview,
-    isFirst,
-    isLast,
-    isBookmarked, 
-    onToggleBookmark 
+const QuestionCard: React.FC<QuestionCardProps> = ({
+  question,
+  mode,
+  userSelectedOption,
+  onAnswer,
+  onNext,
+  onPrevious,
+  onSaveNext,
+  onClearResponse,
+  onMarkForReview,
+  isFirst,
+  isLast,
+  isBookmarked,
+  onToggleBookmark
 }) => {
-  const [explanation, setExplanation] = useState<string | null>(null);
-  const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
-  const [isExplanationOpen, setIsExplanationOpen] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isPractice = mode === 'practice';
+  const showExplanation = isPractice && userSelectedOption !== undefined;
+
+  useEffect(() => {
+    if (containerRef.current && (window as any).renderMathInElement) {
+        (window as any).renderMathInElement(containerRef.current, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '\\[', right: '\\]', display: true}
+            ],
+            throwOnError : false
+        });
+    }
+  }, [question, showExplanation]);
   
-  const cardRef = useRef<HTMLDivElement>(null);
+  const correctIndex = typeof question.correct_answer_index === 'string'
+    ? parseInt(question.correct_answer_index, 10)
+    : question.correct_answer_index;
 
-  const isAnswered = userSelectedOption !== undefined;
-  const isPracticeLocked = mode === 'practice' && isAnswered;
+  const isCorrect = userSelectedOption === correctIndex;
 
-  useEffect(() => {
-    setExplanation(null);
-    setIsLoadingExplanation(false);
-    setIsExplanationOpen(true);
-  }, [question]);
-
-  useEffect(() => {
-    if (mode === 'practice' && isAnswered && question.explanation) {
-      setExplanation(question.explanation);
-      setIsExplanationOpen(true);
-    }
-  }, [mode, isAnswered, question.explanation]);
-
-  useEffect(() => {
-      if (cardRef.current && (window as any).renderMathInElement) {
-          setTimeout(() => {
-            if (cardRef.current) {
-                try {
-                    (window as any).renderMathInElement(cardRef.current, {
-                        delimiters: [
-                            {left: '$$', right: '$$', display: true},
-                            {left: '$', right: '$', display: false},
-                            {left: '\\(', right: '\\)', display: false},
-                            {left: '\\[', right: '\\]', display: true}
-                        ],
-                        throwOnError: false
-                    });
-                } catch (e) {
-                    console.error("KaTeX render error:", e);
-                }
-            }
-          }, 0);
-      }
-  }, [question, explanation, isExplanationOpen, userSelectedOption, mode]);
-
-  const correctIndex = typeof question.correct_answer_index === 'string' 
-      ? parseInt(question.correct_answer_index, 10) 
-      : question.correct_answer_index;
-
-  const processLatex = (text: string) => {
-      if (!text) return "";
-      let processed = text;
-      processed = processed.replace(/\\frac\{([^{}]+)\}\[([^{}]+)\]/g, '\\frac{$1}{$2}');
-      processed = processed.replace(/\\frac\{([^{}]+)\}\[([^{}]+)\}/g, '\\frac{$1}{$2}');
-      processed = processed.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\]/g, '\\frac{$1}{$2}');
-      processed = processed.replace(/\\frac\[([^{}]+)\]\{([^{}]+)\}/g, '\\frac{$1}{$2}');
-      processed = processed.replace(/(?<!\$|\d)(\d+\^\{[a-zA-Z]+\})(?!\$)/g, '$$$1$$');
-      processed = processed.replace(/\$\$(\d+\^\{.*?\})\$\$/g, '$$$1$$');
-      return processed;
-  };
-
-  const formattedQuestion = useMemo(() => {
-      if (!question.question) return "";
-      let text = processLatex(question.question);
-      text = text.replace(/(\s|^)(List\s+[I]+)(\s|:)/g, '\n$2$3');
-      text = text.replace(/(\s|^)(\d+\.)(\s)/g, '\n$2$3');
-      text = text.replace(/(\s|^)(\([a-zA-Z0-9]+\))(\s)/g, '\n$2$3');
-      text = text.replace(/(\s|^)([ivx]+\.)(\s)/g, '\n$2$3');
-      text = text.replace(/(\s|^)(I\.|II\.|III\.|IV\.|V\.|VI\.)(\s)/g, '\n$2$3');
-      return text.trim();
-  }, [question.question]);
-
-  const handleOptionClick = (index: number) => {
-    if (isPracticeLocked) return; 
-    onAnswer(index);
-  };
-  
-  const handleGetExplanation = async () => {
-    if(!process.env.API_KEY) {
-        setExplanation("AI explanation feature is disabled. API key not provided.");
-        setIsExplanationOpen(true);
-        return;
-    }
-    setIsLoadingExplanation(true);
-    setExplanation(null);
-    try {
-        const result = await getExplanationWithAi(question);
-        setExplanation(result);
-        setIsExplanationOpen(true);
-    } catch (error) {
-        setExplanation(error instanceof Error ? error.message : "Could not fetch explanation.");
-        setIsExplanationOpen(true);
-    } finally {
-        setIsLoadingExplanation(false);
-    }
-  };
-
-  const getOptionClass = (index: number) => {
-    // Apple UI Style: rounded-2xl, subtle borders, smooth scale on press
-    let baseClass = 'relative p-4 sm:p-5 rounded-2xl border transition-all duration-200 text-left flex items-center gap-4 w-full group outline-none select-none ';
-    
-    const isSelected = userSelectedOption === index;
-
-    if (mode === 'exam') {
-        if (isSelected) {
-            return `${baseClass} border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 shadow-sm ring-1 ring-indigo-600`;
-        }
-        return `${baseClass} border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-800/50 hover:bg-stone-50 dark:hover:bg-stone-800 hover:border-stone-300 dark:hover:border-stone-700 active:scale-[0.98] cursor-pointer`;
-    }
-
-    if (!isPracticeLocked) {
-      return `${baseClass} border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-800/50 hover:bg-stone-50 dark:hover:bg-stone-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-sm active:scale-[0.98] cursor-pointer`;
-    }
-    
-    if (index === correctIndex) {
-      return `${baseClass} border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm ring-1 ring-emerald-500`;
-    }
-    
-    if (isSelected) {
-      return `${baseClass} border-rose-500 bg-rose-50 dark:bg-rose-900/20 shadow-sm ring-1 ring-rose-500`;
-    }
-    
-    return `${baseClass} border-transparent bg-stone-100/50 dark:bg-stone-900/50 text-stone-400 dark:text-stone-600 cursor-default`;
-  };
-
-  const renderQuestionText = (text: string) => {
-      const parts = text.split(/(\*\*.*?\*\*)/g).filter(part => part !== '');
-      return parts.map((part, i) => {
-          if (part.startsWith('**') && part.endsWith('**')) {
-              return <strong key={i} className="font-bold text-stone-900 dark:text-white">{part.slice(2, -2)}</strong>;
-          }
-          return <span key={i}>{part}</span>;
-      });
-  };
-
-  const renderTextWithBold = (text: string) => {
-      const latexText = processLatex(text);
-      const parts = latexText.split(/(\*\*.*?\*\*)/g).filter(part => part !== '');
-      
-      const SECTION_HEADERS = [
-          'Correct Answer:',
-          'Detailed Explanation:',
-          'Core Concept:',
-          'Why other options are incorrect:',
-          'Explanation:'
-      ];
-
-      return parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-            const content = part.slice(2, -2);
-            const isHeader = SECTION_HEADERS.some(header => content.includes(header));
-            
-            if (isHeader) {
-                return <strong key={i} className="font-bold text-indigo-700 dark:text-indigo-300 block mt-5 mb-2 text-sm tracking-wide uppercase">{content}</strong>;
-            } else {
-                return <strong key={i} className="font-bold text-stone-900 dark:text-stone-100">{content}</strong>;
-            }
-        }
-        
-        let content = part;
-        if (i > 0 && parts[i-1].startsWith('**') && parts[i-1].endsWith('**')) {
-             const prevContent = parts[i-1].slice(2, -2);
-             if (SECTION_HEADERS.some(header => prevContent.includes(header))) {
-                 content = content.trimStart();
-             }
-        }
-        if (i < parts.length - 1 && parts[i+1].startsWith('**') && parts[i+1].endsWith('**')) {
-             const nextContent = parts[i+1].slice(2, -2);
-             if (SECTION_HEADERS.some(header => nextContent.includes(header))) {
-                content = content.trimEnd();
-             }
-        }
-
-        return <span key={i} className="text-stone-700 dark:text-stone-300">{content}</span>;
-      });
-  };
+  const options = ['A', 'B', 'C', 'D'];
 
   return (
-    <div ref={cardRef} className="flex flex-col min-h-full w-full">
-      <div className="flex justify-between items-start mb-8 gap-6">
-          <h3 className="text-lg sm:text-xl font-medium text-stone-900 dark:text-stone-100 leading-relaxed tracking-tight whitespace-pre-wrap text-justify">
-              {renderQuestionText(formattedQuestion)}
-          </h3>
-          
-          {onToggleBookmark && mode === 'practice' && (
-              <button
-                  onClick={onToggleBookmark}
-                  className={`p-2.5 rounded-full transition-all flex-shrink-0 ${isBookmarked 
-                      ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100' 
-                      : 'text-stone-300 hover:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800'}`}
-                  title={isBookmarked ? "Remove Bookmark" : "Bookmark this Question"}
-              >
-                  <Icon name={isBookmarked ? "bookmarkSolid" : "bookmark"} className="w-5 h-5" />
-              </button>
-          )}
-      </div>
-      
-      <div className="space-y-3 mb-auto">
-        {question.options.map((option, index) => {
-            const isSelected = userSelectedOption === index;
-            let icon;
-            
-            if (mode === 'exam') {
-                icon = (
-                    <div className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors ${isSelected ? 'border-indigo-600' : 'border-stone-400 group-hover:border-indigo-400'}`}>
-                        {isSelected && <div className="w-2.5 h-2.5 bg-indigo-600 rounded-full" />}
-                    </div>
-                );
-            } else {
-                icon = <span className="font-bold">{String.fromCharCode(65 + index)}</span>;
-                if (isPracticeLocked) {
-                    if (index === correctIndex) icon = <Icon name="check" className="w-4 h-4" strokeWidth={3}/>;
-                    else if (isSelected) icon = <Icon name="xCircle" className="w-4 h-4" />;
-                }
-            }
-
-            let iconContainerClass = `w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all duration-200 flex-shrink-0 border `;
-            if (mode !== 'exam') {
-                if (!isPracticeLocked) {
-                    // Default State
-                    iconContainerClass += 'bg-stone-100 dark:bg-stone-700 border-stone-200 dark:border-stone-600 text-stone-500 dark:text-stone-400 group-hover:bg-indigo-600 group-hover:border-indigo-600 group-hover:text-white group-hover:shadow-md';
-                } else if (index === correctIndex) {
-                    // Correct
-                    iconContainerClass += 'bg-emerald-500 border-emerald-500 text-white shadow-sm';
-                } else if (isSelected) {
-                    // Incorrect
-                    iconContainerClass += 'bg-rose-500 border-rose-500 text-white shadow-sm';
-                } else {
-                    // Dimmed
-                    iconContainerClass += 'bg-stone-100 dark:bg-stone-800 border-transparent text-stone-300 dark:text-stone-600';
-                }
-            } else {
-                iconContainerClass = "hidden";
-            }
-
-            return (
-              <button
-                key={index}
-                onClick={() => handleOptionClick(index)}
-                disabled={isPracticeLocked}
-                className={getOptionClass(index)}
-              >
-                {mode !== 'exam' && <div className={iconContainerClass}>{icon}</div>}
-                {mode === 'exam' && icon}
-                <span className={`flex-1 font-medium text-sm sm:text-base transition-colors ${
-                    mode === 'practice' && isPracticeLocked 
-                    ? (index === correctIndex ? 'text-emerald-900 dark:text-emerald-100' : isSelected ? 'text-rose-900 dark:text-rose-100' : 'text-stone-700 dark:text-stone-400')
-                    : (isSelected && mode === 'exam' ? 'text-indigo-900 dark:text-indigo-100 font-bold' : 'text-stone-700 dark:text-stone-200 group-hover:text-stone-900 dark:group-hover:text-white')
-                }`}>
-                    {processLatex(option)}
+    <div ref={containerRef} className="space-y-8 animate-slide-up">
+        {/* Question Header */}
+        <div className="flex items-center justify-between relative z-10">
+            <div className="flex items-center gap-3">
+                <span className="px-3 py-1 rounded-full bg-slate-700/50 border border-slate-600/50 text-xs font-semibold text-slate-300">
+                    {question.subtopic || 'General'}
                 </span>
-              </button>
-            );
-        })}
-      </div>
-
-      {/* Explanation Section */}
-      {mode === 'practice' && isPracticeLocked && (
-        <div className="mt-8 animate-fade-in w-full">
-          {explanation && (
-            <div className="mb-6 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 overflow-hidden">
+                <span className="text-slate-400 text-sm font-medium">Question Details</span>
+            </div>
+            <div className="flex gap-2">
                 <button 
-                    onClick={() => setIsExplanationOpen(!isExplanationOpen)}
-                    className="w-full flex items-center justify-between p-4 sm:p-5 text-left focus:outline-none hover:bg-indigo-100/50 dark:hover:bg-indigo-900/40 transition-colors"
+                    onClick={onToggleBookmark}
+                    className={`p-2 rounded-lg hover:bg-white/5 transition-colors ${isBookmarked ? 'text-yellow-400' : 'text-slate-400'}`}
+                    title="Mark for Review"
                 >
-                    <h4 className="font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-2 text-xs uppercase tracking-wide">
-                        <Icon name="sparkles" className="w-4 h-4" />
-                        Explanation
-                    </h4>
-                    <Icon name="chevronRight" className={`w-4 h-4 text-indigo-500 transition-transform ${isExplanationOpen ? 'rotate-90' : ''}`} />
+                    <span className={`material-symbols-outlined ${isBookmarked ? 'filled' : ''}`}>bookmark</span>
                 </button>
-                {isExplanationOpen && (
-                     <div className="px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
-                        <div className="text-stone-700 dark:text-stone-300 leading-7 text-sm sm:text-base whitespace-pre-wrap text-justify break-words border-t border-indigo-100 dark:border-indigo-900/20 pt-4">
-                            {renderTextWithBold(explanation)}
+                <button className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-red-400 transition-colors" title="Report Issue">
+                    <span className="material-symbols-outlined">flag</span>
+                </button>
+            </div>
+        </div>
+
+        {/* Question Text */}
+        <h2 className="text-2xl md:text-3xl font-bold text-white leading-tight relative z-10 drop-shadow-sm">
+            {question.question}
+        </h2>
+
+        {/* Split Layout for Options & AI Explanation */}
+        <div className={`grid grid-cols-1 gap-6 ${showExplanation ? 'lg:grid-cols-2' : ''}`}>
+            {/* Options */}
+            <div className="flex flex-col gap-4 relative z-10">
+                {question.options.map((option, idx) => {
+                    const isSelected = userSelectedOption === idx;
+                    const isCorrectOption = idx === correctIndex;
+
+                    let stateClasses = "border-slate-700 bg-slate-800/30 hover:bg-slate-700/40 group-hover:border-slate-600";
+                    let circleClasses = "border-slate-500 text-slate-300";
+
+                    if (isSelected) {
+                        if (isPractice) {
+                            if (isCorrectOption) {
+                                stateClasses = "border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_15px_rgba(16,185,129,0.1)]";
+                                circleClasses = "border-emerald-500 bg-emerald-500 text-white shadow-sm";
+                            } else {
+                                stateClasses = "border-rose-500/50 bg-rose-500/10";
+                                circleClasses = "border-rose-500 bg-rose-500 text-white";
+                            }
+                        } else {
+                            stateClasses = "border-primary bg-primary/10 shadow-[0_0_15px_rgba(19,91,236,0.1)]";
+                            circleClasses = "border-primary bg-primary text-white shadow-sm";
+                        }
+                    } else if (showExplanation && isCorrectOption) {
+                        stateClasses = "border-emerald-500/30 bg-emerald-500/5";
+                        circleClasses = "border-emerald-500/50 text-emerald-500";
+                    }
+
+                    return (
+                        <label key={idx} className="group cursor-pointer relative">
+                            <input
+                                className="sr-only"
+                                type="radio"
+                                name="options"
+                                checked={isSelected}
+                                onChange={() => onAnswer(idx)}
+                                disabled={showExplanation}
+                            />
+                            <div className={`p-4 rounded-xl border transition-all flex items-center gap-4 ${stateClasses}`}>
+                                <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all shrink-0 ${circleClasses}`}>
+                                    {options[idx]}
+                                    {isPractice && isSelected && isCorrectOption && (
+                                        <span className="material-symbols-outlined text-[14px] absolute -top-1 -right-1 bg-emerald-500 rounded-full text-white">check</span>
+                                    )}
+                                </div>
+                                <span className="text-slate-200 text-lg leading-snug">{option}</span>
+                                {isPractice && isSelected && isCorrectOption && (
+                                    <div className="absolute inset-0 rounded-xl bg-emerald-400/5 animate-pulse pointer-events-none"></div>
+                                )}
+                            </div>
+                        </label>
+                    );
+                })}
+            </div>
+
+            {/* AI Explanation Card */}
+            {showExplanation && (
+                <div className="animate-fade-in lg:block">
+                    <div className="glass-panel h-full rounded-2xl overflow-hidden relative group border-t-0">
+                        <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${isCorrect ? 'from-emerald-500 via-primary' : 'from-rose-500 via-primary'} to-purple-500 opacity-80`}></div>
+                        <div className="p-6 flex flex-col h-full">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="size-8 rounded-lg bg-gradient-to-br from-indigo-500 to-primary flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                                    <span className="material-symbols-outlined text-white text-[18px]">auto_awesome</span>
+                                </div>
+                                <h3 className="text-white text-lg font-bold">AI Insight</h3>
+                                <div className="ml-auto px-2 py-0.5 rounded text-[10px] font-bold bg-white/10 text-white/60 border border-white/5 uppercase tracking-wider">Beta</div>
+                            </div>
+                            <div className="text-gray-300 text-sm leading-relaxed overflow-y-auto pr-2 custom-scrollbar flex-1">
+                                <p className={`font-medium mb-2 ${isCorrect ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {isCorrect ? 'Excellent! That\'s the correct answer.' : 'Not quite. Here\'s the breakdown:'}
+                                </p>
+                                <div className="mb-3 whitespace-pre-wrap">
+                                    {question.explanation || 'No detailed explanation available for this question.'}
+                                </div>
+                                <div className="mt-4 p-3 rounded-lg bg-white/5 border border-white/5 text-xs text-gray-400">
+                                    <strong className="text-gray-200 block mb-1">Key Takeaway:</strong>
+                                    Keep practicing to master this topic!
+                                </div>
+                            </div>
+                            <div className="mt-6 pt-4 border-t border-white/10 flex gap-2">
+                                <button className="flex-1 h-9 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-gray-300 transition-colors flex items-center justify-center gap-2">
+                                    <span className="material-symbols-outlined text-[16px]">thumb_up</span> Helpful
+                                </button>
+                                <button className="flex-1 h-9 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-gray-300 transition-colors flex items-center justify-center gap-2">
+                                    <span className="material-symbols-outlined text-[16px]">share</span> Share
+                                </button>
+                            </div>
                         </div>
                     </div>
-                )}
-            </div>
-          )}
+                </div>
+            )}
         </div>
-      )}
 
-      {/* Footer Actions */}
-      <div className="mt-8 pt-6 border-t border-stone-100 dark:border-stone-800 w-full">
-          {mode === 'practice' ? (
-             <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
-                  <div className="w-full sm:w-auto flex-1 flex justify-start">
-                    <button onClick={onPrevious} disabled={isFirst} className="w-full sm:w-auto px-5 py-3 text-sm font-bold text-stone-600 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-xl disabled:opacity-30 flex items-center justify-center gap-2 border border-stone-200 dark:border-stone-700 shadow-sm active:scale-[0.98] transition-transform">
-                        <Icon name="chevronLeft" className="w-4 h-4" /> Back
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto justify-end">
-                    {isPracticeLocked && !question.explanation && !explanation && (
-                        <button onClick={handleGetExplanation} disabled={isLoadingExplanation} className="w-full sm:w-auto px-5 py-3 text-sm font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded-xl flex items-center justify-center gap-2 border border-indigo-100 dark:border-indigo-800 active:scale-[0.98] transition-transform">
-                            {isLoadingExplanation ? <Spinner /> : <Icon name="sparkles" className="w-4 h-4" />} Explain
-                        </button>
-                    )}
-
-                    {isPracticeLocked && (
-                        <button onClick={onNext} className="w-full sm:w-auto sm:min-w-[140px] px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
-                            {isLast ? 'Finish' : 'Next'} <Icon name="chevronRight" className="w-4 h-4" />
-                        </button>
-                    )}
-                  </div>
-             </div>
-          ) : (
-              <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
-                  <div className="flex gap-3 w-full sm:w-auto flex-1">
-                      <button 
-                          onClick={onMarkForReview ? () => { onMarkForReview(); if(!isLast) onNext(); } : undefined} 
-                          className="flex-1 sm:flex-none px-4 py-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 text-fuchsia-700 dark:text-fuchsia-300 border border-fuchsia-200 dark:border-fuchsia-800 rounded-xl text-sm font-bold hover:bg-fuchsia-100 transition-colors active:scale-[0.98]"
-                      >
-                          {isLast ? 'Mark Review' : 'Mark Review & Next'}
-                      </button>
-                      
-                      <button onClick={onClearResponse} className="flex-1 sm:flex-none px-4 py-3 bg-stone-50 dark:bg-stone-800 text-stone-600 dark:text-stone-400 border border-stone-200 dark:border-stone-700 rounded-xl text-sm font-bold hover:bg-stone-100 transition-colors active:scale-[0.98]">
-                          Clear
-                      </button>
-                  </div>
-
-                  <button onClick={onSaveNext} className="w-full sm:w-auto sm:min-w-[140px] px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 active:scale-[0.98]">
-                      {isLast ? 'Save & Submit' : 'Save & Next'}
-                  </button>
-              </div>
-          )}
-      </div>
+        {/* Actions */}
+        <div className="flex items-center justify-between mt-10 pt-6 border-t border-slate-700/50 relative z-10">
+            <button
+                onClick={onPrevious}
+                disabled={isFirst}
+                className="glass-button px-6 py-3 rounded-xl text-slate-300 font-semibold hover:bg-white/10 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+                <span className="material-symbols-outlined">arrow_back</span>
+                Previous
+            </button>
+            <div className="flex gap-3">
+                <button
+                    onClick={onClearResponse}
+                    className="glass-button px-6 py-3 rounded-xl text-slate-300 font-semibold hover:bg-white/10 flex items-center gap-2 transition-all"
+                >
+                    Clear
+                </button>
+                <button
+                    onClick={onSaveNext}
+                    className="px-8 py-3 rounded-xl bg-primary text-white font-bold hover:bg-primary/90 shadow-lg shadow-primary/25 flex items-center gap-2 transform transition-transform active:scale-95"
+                >
+                    {isLast ? 'Finish Test' : 'Save & Next'}
+                    <span className="material-symbols-outlined">arrow_forward</span>
+                </button>
+            </div>
+        </div>
     </div>
   );
 };

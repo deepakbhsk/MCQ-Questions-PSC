@@ -2,22 +2,22 @@
 import { createClient } from '@supabase/supabase-js';
 import { Question } from '../types';
 
-// Supabase project credentials provided by the user.
-const supabaseUrl = 'https://lqibglpbquybvsrywyhm.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxaWJnbHBicXV5YnZzcnl3eWhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMyMTg1MTAsImV4cCI6MjA3ODc5NDUxMH0.te4Uq6RnUKq38AtlSVLBIR4vDC4GYGJQPRpKMJ0e_9I';
+// Supabase project credentials.
+// Use VITE_ prefix for Vite environmental variables.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 // The types provide safety for database operations.
-// `Row` matches the table structure.
-// `Insert` is for new records (DB handles `id`, `created_at`).
-// `Update` is for changing existing records.
-export const supabase = createClient<{
+export interface Database {
   public: {
     Tables: {
       questions: {
         Row: Question;
-        Insert: Omit<Question, 'id' | 'created_at'>;
-        Update: Partial<Omit<Question, 'id' | 'created_at'>>;
+        Insert: Omit<Question, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<Question, 'id' | 'created_at'>> & { id?: string; created_at?: string };
       };
     };
   };
-}>(supabaseUrl, supabaseAnonKey);
+}
+
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);

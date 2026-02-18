@@ -1,883 +1,256 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Question, QuestionLevel, SUBTOPIC_SUGGESTIONS, SUBTOPIC_HIERARCHY } from '../types';
-import Icon from './Icon';
+import React, { useState } from 'react';
+import { Question, QuestionLevel } from '../types';
 import Spinner from './Spinner';
-import { generateMcqsFromText, extractRawQuestionsFromText } from '../services/geminiService';
+import { extractRawQuestionsFromText, solveQuestionWithAi } from '../services/geminiService';
 
 interface BulkGenerateFormProps {
   onCancel: () => void;
   onAddQuestions: (questions: Omit<Question, 'id' | 'created_at'>[]) => void;
-  disabled?: boolean;
   existingQuestions: Question[];
-  initialLevel?: QuestionLevel | null;
+  initialLevel: QuestionLevel | null;
 }
 
-const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({ onCancel, onAddQuestions, disabled, existingQuestions, initialLevel }) => {
-  // Input Mode: 'text' or 'pdf' or 'excel'
-  const [inputMode, setInputMode] = useState<'text' | 'pdf' | 'excel'>('text');
-  
+const BulkGenerateForm: React.FC<BulkGenerateFormProps> = ({
+  onCancel,
+  onAddQuestions,
+}) => {
   const [rawText, setRawText] = useState('');
-  const [pdfFile, setPdfFile] = useState<{ data: string, name: string } | null>(null);
-  const [excelFile, setExcelFile] = useState<{ name: string, data: any[] } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const excelInputRef = useRef<HTMLInputElement>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [extractedQuestions, setExtractedQuestions] = useState<Omit<Question, 'id' | 'created_at'>[]>([]);
+  const [currentExtraction, setCurrentExtraction] = useState<Omit<Question, 'id' | 'created_at'> | null>(null);
 
-  const [level, setLevel] = useState<QuestionLevel>(initialLevel || QuestionLevel.DEGREE);
-  
-  // Persistent State Logic
-  const [examName, setExamName] = useState(() => localStorage.getItem('last_exam_name') || '');
-  const [codePrefix, setCodePrefix] = useState(() => localStorage.getItem('last_code_prefix') || '');
-  const [subtopic, setSubtopic] = useState(() => localStorage.getItem('last_subtopic') || '');
-  const [specificTopic, setSpecificTopic] = useState(() => localStorage.getItem('last_specific_topic') || '');
-  
-  const [generatedQuestions, setGeneratedQuestions] = useState<Omit<Question, 'id' | 'created_at'>[]>([]);
-  const [studyNotes, setStudyNotes] = useState<string>('');
-  const [detectedTopic, setDetectedTopic] = useState<string>('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isExtracting, setIsExtracting] = useState(false); // For "Extract Only" mode
-  const [error, setError] = useState('');
-  
-  // Preview Mode State
-  const [previewTab, setPreviewTab] = useState<'questions' | 'notes'>('questions');
+  const handleAnalyze = async () => {
+    if (!rawText.trim()) return;
+    setIsAnalyzing(true);
+    try {
+        const questions = await extractRawQuestionsFromText(rawText);
+        if (questions.length > 0) {
+            // Take the first one for detailed review/solving, add others to batch immediately?
+            // Or just add all to batch and let user review them in the preview?
 
-  // Autocomplete States
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const suggestionsRef = useRef<HTMLDivElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
+            // To follow the design, let's "solve" the first one to show it in the results section
+            const solved = await solveQuestionWithAi(questions[0].question, questions[0].options);
 
-  useEffect(() => {
-      if (initialLevel) {
-          setLevel(initialLevel);
-      }
-  }, [initialLevel]);
-
-  // Check if we are in the specific Topic Generator flow
-  const isFixedTopicMode = initialLevel === QuestionLevel.TOPIC;
-  const isTopicMode = level === QuestionLevel.TOPIC;
-
-  // Persist inputs to localStorage whenever they change
-  useEffect(() => { localStorage.setItem('last_exam_name', examName); }, [examName]);
-  useEffect(() => { localStorage.setItem('last_code_prefix', codePrefix); }, [codePrefix]);
-  useEffect(() => { localStorage.setItem('last_subtopic', subtopic); }, [subtopic]);
-  useEffect(() => { localStorage.setItem('last_specific_topic', specificTopic); }, [specificTopic]);
-
-  // Restrict subtopics for OTHERS and TECHNICAL levels
-  const isSubtopicRestricted = level === QuestionLevel.OTHERS || level === QuestionLevel.TECHNICAL;
-
-  // Derived available specific topics based on selected subtopic
-  const availableSpecificTopics = useMemo(() => {
-      if (!subtopic || subtopic === 'General') return [];
-      return SUBTOPIC_HIERARCHY[subtopic] || [];
-  }, [subtopic]);
-
-  // Close suggestions when clicking outside
-  useEffect(() => {
-      const handleClickOutside = (event: MouseEvent) => {
-          if (suggestionsRef.current && !suggestionsRef.current.contains(event.target as Node)) {
-              setShowSuggestions(false);
-          }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Filter existing exams for autocomplete
-  const examSuggestions = useMemo(() => {
-      if (!examName.trim()) return [];
-      const uniqueExams = new Set<string>();
-      existingQuestions
-        .filter(q => q.level === level) // Filter by current level to show relevant suggestions
-        .forEach(q => {
-          if (q.name) uniqueExams.add(q.name);
-        });
-      
-      return Array.from(uniqueExams)
-          .filter(name => name.toLowerCase().includes(examName.toLowerCase()))
-          .slice(0, 5); // Limit to 5 suggestions
-  }, [examName, existingQuestions, level]);
-
-  // Render LaTeX in preview
-  useEffect(() => {
-    if ((generatedQuestions.length > 0 || studyNotes) && previewRef.current && (window as any).renderMathInElement) {
-         setTimeout(() => {
-            if (previewRef.current) {
-                (window as any).renderMathInElement(previewRef.current, {
-                    delimiters: [
-                        {left: '$$', right: '$$', display: true},
-                        {left: '$', right: '$', display: false},
-                        {left: '\\(', right: '\\)', display: false},
-                        {left: '\\[', right: '\\]', display: true}
-                    ],
-                    throwOnError: false
-                });
-            }
-         }, 100);
-    }
-  }, [generatedQuestions, studyNotes, previewTab]);
-
-  const processLatex = (text: string) => {
-    if (!text) return "";
-    let processed = text;
-    processed = processed.replace(/\\frac\{([^{}]+)\}\[([^{}]+)\]/g, '\\frac{$1}{$2}');
-    processed = processed.replace(/\\frac\{([^{}]+)\}\[([^{}]+)\}/g, '\\frac{$1}{$2}');
-    processed = processed.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\]/g, '\\frac{$1}{$2}');
-    processed = processed.replace(/\\frac\[([^{}]+)\]\{([^{}]+)\}/g, '\\frac{$1}{$2}');
-    processed = processed.replace(/(?<!\$|\d)(\d+\^\{[a-zA-Z]+\})(?!\$)/g, '$$$1$$');
-    processed = processed.replace(/\$\$(\d+\^\{.*?\})\$\$/g, '$$$1$$');
-    return processed;
-  };
-
-  const renderPreviewText = (text: string) => {
-    const processed = processLatex(text);
-    const parts = processed.split(/(\*\*.*?\*\*)/g).filter(part => part !== '');
-    return parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-            return <strong key={i} className="font-bold text-slate-900 dark:text-white">{part.slice(2, -2)}</strong>;
-        }
-        return <span key={i}>{part}</span>;
-    });
-  };
-
-  const extractPrefix = (code: string | undefined) => {
-      if (!code) return '';
-      return code.split('-').slice(0, -1).join('-') || code.split('-')[0];
-  }
-
-  const handleSelectExam = (selectedName: string) => {
-      setExamName(selectedName);
-      setShowSuggestions(false);
-
-      // Find a reference question to auto-fill other fields
-      const refQuestion = existingQuestions.find(q => q.name === selectedName && q.level === level);
-      if (refQuestion) {
-          if (refQuestion.level === QuestionLevel.OTHERS || refQuestion.level === QuestionLevel.TECHNICAL) {
-              setSubtopic('General');
-          } else if (refQuestion.level !== QuestionLevel.TOPIC) {
-              setSubtopic('');
-          }
-
-          const prefix = extractPrefix(refQuestion.code);
-          if (prefix) setCodePrefix(prefix);
-      }
-  };
-
-  const handleLevelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const newLevel = e.target.value as QuestionLevel;
-      setLevel(newLevel);
-      if (newLevel === QuestionLevel.OTHERS || newLevel === QuestionLevel.TECHNICAL) {
-          setSubtopic('General');
-      } else {
-          if (subtopic === 'General') setSubtopic('');
-      }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0]) {
-          const file = e.target.files[0];
-          
-          if (file.size > 5 * 1024 * 1024) { // 5MB Limit
-              setError("File size exceeds 5MB limit. Please upload a smaller PDF.");
-              setPdfFile(null);
-              if (fileInputRef.current) fileInputRef.current.value = "";
-              return;
-          }
-
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              const base64String = reader.result as string;
-              const base64Data = base64String.split(',')[1];
-              setPdfFile({ data: base64Data, name: file.name });
-              setError('');
-          };
-          reader.readAsDataURL(file);
-      }
-  };
-  
-  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            const reader = new FileReader();
-
-            reader.onload = (event) => {
-                try {
-                    const data = new Uint8Array(event.target?.result as ArrayBuffer);
-                    const workbook = (window as any).XLSX.read(data, { type: 'array' });
-                    const sheetName = workbook.SheetNames[0];
-                    const sheet = workbook.Sheets[sheetName];
-                    const jsonData = (window as any).XLSX.utils.sheet_to_json(sheet);
-                    
-                    if (jsonData.length === 0) {
-                        setError("The Excel file appears to be empty.");
-                        setExcelFile(null);
-                        return;
-                    }
-                    
-                    setExcelFile({ name: file.name, data: jsonData });
-                    setError('');
-                } catch (err) {
-                    console.error("Excel parse error:", err);
-                    setError("Failed to parse Excel file. Please ensure it is a valid .xlsx or .csv file.");
-                }
+            const fullQuestion: Omit<Question, 'id' | 'created_at'> = {
+                question: questions[0].question,
+                options: questions[0].options,
+                correct_answer_index: solved.correct_answer_index,
+                explanation: solved.explanation,
+                level: QuestionLevel.DEGREE, // Default
+                subtopic: "General",
+                name: "AI Extracted Set"
             };
             
-            reader.readAsArrayBuffer(file);
-        }
-  };
-  
-  const downloadTemplate = () => {
-      const templateData = [
-          {
-              "Question": "Which is the capital of India?",
-              "Option A": "Mumbai",
-              "Option B": "Delhi",
-              "Option C": "Kolkata",
-              "Option D": "Chennai",
-              "Answer": "Option B",
-              "Explanation": "Delhi is the capital of India."
-          },
-          {
-              "Question": "The largest planet in our solar system is?",
-              "Option A": "Mars",
-              "Option B": "Jupiter",
-              "Option C": "Earth",
-              "Option D": "Saturn",
-              "Answer": "Jupiter",
-              "Explanation": "Jupiter is the largest planet."
-          }
-      ];
-      
-      const worksheet = (window as any).XLSX.utils.json_to_sheet(templateData);
-      const workbook = (window as any).XLSX.utils.book_new();
-      (window as any).XLSX.utils.book_append_sheet(workbook, worksheet, "Template");
-      (window as any).XLSX.writeFile(workbook, "PSC_Questions_Template.xlsx");
-  };
-
-  const checkDuplicate = (newQ: Omit<Question, 'id' | 'created_at'>) => {
-      const isDbDuplicate = existingQuestions.some(existing => 
-          existing.question.trim().toLowerCase() === newQ.question.trim().toLowerCase() ||
-          (existing.question.length > 50 && newQ.question.length > 50 && existing.question.substring(0, 50) === newQ.question.substring(0, 50))
-      );
-      return isDbDuplicate;
-  };
-
-  const validateInputs = () => {
-    let activeCodePrefix = codePrefix;
-    if (isTopicMode) {
-        const sanitized = examName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 6).toUpperCase();
-        activeCodePrefix = sanitized || 'TOPIC';
-    }
-
-    if (!examName.trim() || (!isTopicMode && !activeCodePrefix.trim())) {
-      setError("Please provide required fields.");
-      return null;
-    }
-
-    let inputData: any;
-    
-    if (inputMode === 'excel') {
-        if (!excelFile) {
-            setError("Please upload an Excel file first.");
-            return null;
-        }
-        inputData = excelFile.data;
-    } else if (inputMode === 'text') {
-        if (!rawText.trim()) {
-            setError("Please paste some text into the content area first.");
-            return null;
-        }
-        inputData = rawText;
-    } else {
-        if (!pdfFile) {
-            setError("Please upload a PDF file first.");
-            return null;
-        }
-        inputData = { data: pdfFile.data, mimeType: 'application/pdf' };
-    }
-    
-    if(!process.env.API_KEY && inputMode !== 'excel') {
-        setError("AI feature is disabled. API key not provided.");
-        return null;
-    }
-
-    let effectiveExamName = examName;
-    let effectiveSubtopic = subtopic;
-    
-    if (isTopicMode) {
-        effectiveExamName = specificTopic || 'Auto-Detect'; 
-        const sub = subtopic || 'General';
-        effectiveSubtopic = `${examName} > ${sub}`;
-    }
-
-    return { inputData, activeCodePrefix, effectiveExamName, effectiveSubtopic };
-  };
-  
-  const processExcelData = (data: any[], vars: any) => {
-      const questions: Omit<Question, 'id' | 'created_at'>[] = [];
-      
-      data.forEach((row, index) => {
-          const normalizedRow: any = {};
-          Object.keys(row).forEach(key => {
-              normalizedRow[key.trim().toLowerCase()] = row[key];
-          });
-          
-          const qText = normalizedRow['question'] || normalizedRow['q'] || normalizedRow['statement'];
-          const optA = normalizedRow['option a'] || normalizedRow['a'] || normalizedRow['option 1'];
-          const optB = normalizedRow['option b'] || normalizedRow['b'] || normalizedRow['option 2'];
-          const optC = normalizedRow['option c'] || normalizedRow['c'] || normalizedRow['option 3'];
-          const optD = normalizedRow['option d'] || normalizedRow['d'] || normalizedRow['option 4'];
-          const ans = normalizedRow['answer'] || normalizedRow['ans'] || normalizedRow['correct'] || normalizedRow['key'];
-          const expl = normalizedRow['explanation'] || normalizedRow['exp'] || normalizedRow['rationale'];
-          
-          if (qText && optA && optB && optC && optD) {
-              const options = [String(optA), String(optB), String(optC), String(optD)];
-              let correctIdx = -1;
-              
-              if (ans) {
-                  const ansStr = String(ans).toLowerCase().trim();
-                  if (ansStr === 'a' || ansStr === 'option a') correctIdx = 0;
-                  else if (ansStr === 'b' || ansStr === 'option b') correctIdx = 1;
-                  else if (ansStr === 'c' || ansStr === 'option c') correctIdx = 2;
-                  else if (ansStr === 'd' || ansStr === 'option d') correctIdx = 3;
-                  else {
-                      const idx = options.findIndex(o => o.toLowerCase().trim() === ansStr);
-                      if (idx !== -1) correctIdx = idx;
-                  }
-              }
-              
-              questions.push({
-                  level: level,
-                  name: isTopicMode ? (specificTopic || 'Uncategorized') : vars.effectiveExamName,
-                  code: `${vars.activeCodePrefix}-${(index + 1).toString().padStart(3, '0')}`,
-                  subtopic: vars.effectiveSubtopic || 'General',
-                  question: String(qText),
-                  options: options,
-                  correct_answer_index: correctIdx,
-                  explanation: expl ? String(expl) : ''
-              });
-          }
-      });
-      
-      return questions;
-  };
-
-  const handleGenerate = async () => {
-    const vars = validateInputs();
-    if (!vars) return;
-    
-    setIsGenerating(true);
-    setError('');
-    setGeneratedQuestions([]);
-    setStudyNotes('');
-    setDetectedTopic('');
-
-    try {
-      if (inputMode === 'excel') {
-          // EXCEL IMPORT FLOW
-          const extractedQs = processExcelData(vars.inputData, vars);
-          
-          if (extractedQs.length === 0) {
-              setError("Could not find any valid questions in the Excel file. Please check column headers (Question, Option A, Option B, etc.).");
-          } else {
-              const uniqueNewQuestions = extractedQs.filter(newQ => !checkDuplicate(newQ));
-              if (uniqueNewQuestions.length === 0) {
-                   setError(`Found ${extractedQs.length} questions, but ALL were duplicates.`);
-              } else {
-                   setGeneratedQuestions(uniqueNewQuestions);
-                   setPreviewTab('questions');
-              }
-          }
-      } else {
-          // AI GENERATION FLOW
-          const requestCount = inputMode === 'pdf' ? 30 : 50; 
-          
-          const result = await generateMcqsFromText(
-              vars.inputData, 
-              level, 
-              vars.effectiveExamName, 
-              vars.activeCodePrefix, 
-              vars.effectiveSubtopic, 
-              specificTopic, 
-              requestCount
-          );
-
-          if (result.questions.length === 0) {
-              setError("The AI could not generate questions. Try providing more detailed content.");
-          } else {
-              let generatedQs = result.questions;
-              if (isTopicMode && !specificTopic) {
-                 const finalSpecificTopic = result.detectedTopic || 'Generated Set';
-                 generatedQs = generatedQs.map(q => ({
-                     ...q,
-                     name: finalSpecificTopic
-                 }));
-                 setDetectedTopic(finalSpecificTopic);
-              } else if (isTopicMode) {
-                 setDetectedTopic(specificTopic);
-              }
-
-              const uniqueNewQuestions = generatedQs.filter(newQ => !checkDuplicate(newQ));
-              const duplicateCount = generatedQs.length - uniqueNewQuestions.length;
-              
-              if (uniqueNewQuestions.length === 0) {
-                  setError(`Generated ${generatedQs.length} questions, but ALL were duplicates of existing questions in the database.`);
-              } else {
-                  const finalQuestions = inputMode === 'pdf' ? uniqueNewQuestions.slice(0, 20) : uniqueNewQuestions;
-                  
-                  setGeneratedQuestions(finalQuestions);
-                  setStudyNotes(result.studyNotes);
-                  if (!isTopicMode) setDetectedTopic(result.detectedTopic);
-                  setPreviewTab('questions');
-                  
-                  if (duplicateCount > 0) {
-                      console.info(`Filtered out ${duplicateCount} duplicate questions.`);
-                  }
-              }
-          }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "An unknown error occurred.");
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleExtractOnly = async () => {
-    if (inputMode === 'excel') {
-        handleGenerate(); // Excel is already "extracted"
-        return;
-    }
-
-    const vars = validateInputs();
-    if (!vars) return;
-
-    setIsExtracting(true);
-    setError('');
-    setGeneratedQuestions([]);
-    setStudyNotes('');
-    setDetectedTopic('');
-
-    try {
-        const rawQs = await extractRawQuestionsFromText(vars.inputData, 100);
-        
-        if (rawQs.length === 0) {
-            setError("Could not extract any questions.");
-        } else {
-            const extractedQuestions: Omit<Question, 'id' | 'created_at'>[] = rawQs.map((q, i) => ({
-                level: level,
-                name: isTopicMode ? (specificTopic || 'Uncategorized Topic') : vars.effectiveExamName,
-                code: `${vars.activeCodePrefix}-${(i + 1).toString().padStart(3, '0')}`,
-                subtopic: vars.effectiveSubtopic || 'General',
-                question: q.question,
-                options: q.options,
-                correct_answer_index: -1, // Marked as unsolved
-                explanation: ''
-            }));
-
-            const uniqueNewQuestions = extractedQuestions.filter(newQ => !checkDuplicate(newQ));
+            setCurrentExtraction(fullQuestion);
             
-            if (uniqueNewQuestions.length === 0) {
-                setError(`Extracted ${extractedQuestions.length} questions, but ALL were duplicates.`);
-            } else {
-                setGeneratedQuestions(uniqueNewQuestions);
-                setPreviewTab('questions');
+            // Add the rest to batch if any
+            if (questions.length > 1) {
+                const others = questions.slice(1).map(q => ({
+                    question: q.question,
+                    options: q.options,
+                    correct_answer_index: -1, // Unsolved
+                    level: QuestionLevel.DEGREE,
+                    subtopic: "General",
+                    name: "AI Extracted Set"
+                }));
+                setExtractedQuestions(prev => [...others, ...prev]);
             }
         }
-
-    } catch (e) {
-        setError(e instanceof Error ? e.message : "Extraction failed.");
+    } catch (error) {
+        console.error("AI Extraction failed", error);
+        alert("Failed to extract questions. Please try again.");
     } finally {
-        setIsExtracting(false);
+        setIsAnalyzing(false);
     }
   };
 
-  const handleAddAll = () => {
-    onAddQuestions(generatedQuestions);
+  const handleAddToBatch = () => {
+      if (currentExtraction) {
+          setExtractedQuestions([currentExtraction, ...extractedQuestions]);
+          setCurrentExtraction(null);
+          setRawText('');
+      }
   };
-  
-  const handleCopyNotes = () => {
-      navigator.clipboard.writeText(studyNotes);
-      alert("Study notes copied to clipboard!");
-  }
 
-  const inputClass = "mt-1 block w-full px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm text-slate-900 dark:text-white outline-none placeholder-slate-400";
-  const labelClass = "block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1";
+  const handleFinalize = () => {
+      onAddQuestions(extractedQuestions);
+  };
+
+  const glassInputClass = "glass-input w-full px-4 py-3 rounded-xl text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all";
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-lg p-8 animate-fade-in space-y-8 border border-slate-200 dark:border-slate-800">
-      <div className="border-b border-slate-100 dark:border-slate-800 pb-4 flex items-center gap-3">
-         <div className={`p-2 rounded-xl flex items-center justify-center ${isTopicMode ? 'bg-sky-50 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400' : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400'}`}>
-            <Icon name={isTopicMode ? "lightBulb" : "sparkles"} className="w-6 h-6" />
-         </div>
-         <div>
-            <h3 className="text-xl font-bold mb-1 text-slate-900 dark:text-white">
-                {isTopicMode ? "Topic Generator" : "Bulk AI Generator"}
-            </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Generate questions from text, PDF, or import Excel.</p>
-         </div>
-      </div>
-
-      <div className="space-y-5">
-         {!isFixedTopicMode && (
-         <div>
-            <label htmlFor="level" className={labelClass}>Type / Level <span className="text-rose-500">*</span></label>
-            <select
-                id="level"
-                name="level"
-                value={level}
-                onChange={handleLevelChange}
-                required
-                className={inputClass}
-            >
-                {Object.values(QuestionLevel).map(levelValue => (
-                    <option key={levelValue} value={levelValue}>{levelValue}</option>
-                ))}
-            </select>
-        </div>
-        )}
-        <div className={`grid grid-cols-1 ${!isTopicMode ? 'sm:grid-cols-2' : ''} gap-4`}>
-            <div className="relative" ref={suggestionsRef}>
-                <label htmlFor="examName" className={labelClass}>
-                    {isTopicMode ? "Main Topic / Subject" : "Exam Name"} <span className="text-rose-500">*</span>
-                </label>
-                <input 
-                    type="text" 
-                    name="examName" 
-                    id="examName" 
-                    value={examName} 
-                    onChange={(e) => {
-                        setExamName(e.target.value);
-                        setShowSuggestions(true);
-                    }} 
-                    onFocus={() => setShowSuggestions(true)}
-                    required 
-                    className={inputClass} 
-                    placeholder={isTopicMode ? "e.g., Biology" : "e.g., Kerala History"}
-                    autoComplete="off"
-                />
-                {showSuggestions && examSuggestions.length > 0 && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-auto">
-                        {examSuggestions.map((suggestion, index) => (
-                            <button
-                                key={index}
-                                onClick={() => handleSelectExam(suggestion)}
-                                className="w-full text-left px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors border-b border-slate-100 dark:border-slate-800 last:border-0"
-                            >
-                                {suggestion}
-                            </button>
-                        ))}
+    <div className="flex flex-col gap-8 animate-fade-in">
+        <div className="flex-1 flex flex-col md:flex-row gap-8">
+            {/* Left Column: Input & AI Canvas */}
+            <div className="flex-[1.5] space-y-8 pb-12">
+                <section className="space-y-6">
+                    <div className="flex flex-col gap-1">
+                        <h2 className="text-2xl font-bold text-white tracking-tight">AI Question Creator</h2>
+                        <p className="text-slate-400 text-sm">Fill metadata and use AI to extract question details automatically.</p>
                     </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Question Paper Code</label>
+                            <div className="relative">
+                                <input className={glassInputClass} placeholder="e.g., 045/2023" type="text"/>
+                                <button className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1 bg-primary/20 text-primary text-[10px] font-bold uppercase rounded-lg hover:bg-primary/30 transition-all">
+                                    Fetch
+                                </button>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Department</label>
+                            <input className={glassInputClass} placeholder="e.g., Kerala Police" type="text"/>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">AI Input Canvas</label>
+                        <div className="relative group">
+                            <textarea
+                                className={`${glassInputClass} min-h-[160px] p-6 resize-none`}
+                                placeholder="Paste raw question text here... (e.g. 1. Who founded Sahodara Sangham? A. K. Ayyappan B. C. Kesavan...)"
+                                value={rawText}
+                                onChange={(e) => setRawText(e.target.value)}
+                            ></textarea>
+                            <div className={`absolute bottom-4 right-4 flex items-center gap-2 transition-opacity ${rawText ? 'opacity-100' : 'opacity-0'}`}>
+                                <span className="text-[10px] text-slate-500 font-medium">Click to Process</span>
+                                <button 
+                                    onClick={handleAnalyze}
+                                    disabled={isAnalyzing}
+                                    className="px-4 py-2 bg-primary text-white text-xs font-bold rounded-lg flex items-center gap-2 shadow-xl hover:bg-primary/90 transition-all disabled:opacity-50"
+                                >
+                                    {isAnalyzing ? <Spinner /> : <span className="material-symbols-outlined text-[16px]">auto_awesome</span>}
+                                    {isAnalyzing ? 'Analyzing...' : 'Analyze with AI'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                {/* AI Results Section */}
+                {currentExtraction && (
+                    <section className="glass-panel rounded-2xl p-6 space-y-6 border-primary/30 bg-primary/5 animate-slide-up">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                <h3 className="text-sm font-bold text-white uppercase tracking-wider">AI Suggestions</h3>
+                            </div>
+                            <span className="px-3 py-1 bg-primary/20 text-primary text-[10px] font-bold rounded-full">98% Confidence</span>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="space-y-2">
+                                <p className="text-xs font-semibold text-slate-500 px-1">Extracted Question</p>
+                                <p className="text-white text-base leading-relaxed font-medium">{currentExtraction.question}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                {currentExtraction.options.map((opt, i) => (
+                                    <div key={i} className={`p-4 rounded-xl border flex items-center gap-3 ${i === currentExtraction.correct_answer_index ? 'border-primary/30 bg-primary/10' : 'border-white/5 bg-white/5'}`}>
+                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${i === currentExtraction.correct_answer_index ? 'bg-primary' : 'bg-slate-700'}`}>
+                                            {String.fromCharCode(65 + i)}
+                                        </div>
+                                        <span className={`text-sm font-medium ${i === currentExtraction.correct_answer_index ? 'text-white' : 'text-slate-300'}`}>{opt}</span>
+                                        {i === currentExtraction.correct_answer_index && (
+                                            <span className="material-symbols-outlined text-emerald-500 ml-auto text-lg">check_circle</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-xs font-semibold text-slate-500 px-1">Explanation & Context</label>
+                                    <button className="text-[10px] text-primary font-bold hover:underline">Edit Explanation</button>
+                                </div>
+                                <div className="p-4 glass-input rounded-xl">
+                                    <p className="text-sm text-slate-300 leading-relaxed italic">{currentExtraction.explanation}</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-4 pt-2">
+                                <div className="flex-1">
+                                    <p className="text-xs font-semibold text-slate-500 px-1 mb-2">Subject Category</p>
+                                    <div className="flex items-center gap-2">
+                                        <span className="px-3 py-1.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-bold">{currentExtraction.name}</span>
+                                        <span className="px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-bold">{currentExtraction.subtopic}</span>
+                                        <button className="material-symbols-outlined text-slate-500 hover:text-white text-[20px] transition-colors">add_circle</button>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={handleAddToBatch}
+                                    className="mt-auto px-8 py-3 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/30 flex items-center gap-2 hover:bg-primary/90 transition-all active:scale-95"
+                                >
+                                    Add to Batch
+                                    <span className="material-symbols-outlined text-[18px]">send</span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
                 )}
             </div>
-            {!isTopicMode && (
-            <div>
-                <label htmlFor="codePrefix" className={labelClass}>
-                    Question Code <span className="text-rose-500">*</span>
-                </label>
-                <input type="text" name="codePrefix" id="codePrefix" value={codePrefix} onChange={(e) => setCodePrefix(e.target.value)} required className={inputClass} placeholder="e.g. GK-KER"/>
-            </div>
-            )}
-        </div>
-        
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="relative">
-                <label htmlFor="subtopic" className={labelClass}>{isTopicMode ? "Subtopic" : "Subtopic"}</label>
-                <div className="relative">
-                    <select
-                        id="subtopic"
-                        name="subtopic"
-                        value={subtopic}
-                        onChange={(e) => {
-                            setSubtopic(e.target.value);
-                            setSpecificTopic(''); 
-                        }}
-                        className={`${inputClass} ${isSubtopicRestricted ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-not-allowed' : ''}`}
-                        disabled={isSubtopicRestricted}
-                    >
-                        <option value="">Auto-detect (Per Question)</option>
-                        <option value="General">General</option>
-                        {SUBTOPIC_SUGGESTIONS.map(suggestion => (
-                            <option key={suggestion} value={suggestion}>{suggestion}</option>
-                        ))}
-                    </select>
-                    {isSubtopicRestricted && (
-                        <div className="absolute inset-y-0 right-8 flex items-center pointer-events-none" title="Subtopic disabled for this level">
-                            <Icon name="lock" className="w-4 h-4 text-slate-400" />
+
+            {/* Right Column: List Preview */}
+            <div className="flex-1 max-w-md flex flex-col gap-6">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold text-white">Batch Preview</h3>
+                    <span className="text-xs font-medium text-slate-400">{extractedQuestions.length} Questions</span>
+                </div>
+                <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar max-h-[600px]">
+                    {extractedQuestions.map((q, idx) => (
+                        <div key={idx} className="glass-panel p-5 rounded-2xl group relative hover:border-white/20 transition-all animate-slide-up">
+                            <button className="absolute -right-2 -top-2 w-8 h-8 rounded-full bg-red-500/10 border border-red-500/30 text-red-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 hover:text-white">
+                                <span className="material-symbols-outlined text-[18px]">delete</span>
+                            </button>
+                            <div className="flex items-start justify-between mb-3">
+                                <span className="px-2 py-0.5 bg-white/10 rounded text-[10px] font-bold text-slate-300 uppercase tracking-tighter">Q. {extractedQuestions.length - idx}</span>
+                                <span className="text-[10px] text-slate-500 font-medium">Extracted</span>
+                            </div>
+                            <p className="text-sm text-white font-medium line-clamp-2 leading-relaxed mb-4">{q.question}</p>
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+                                    <span className="text-[11px] font-bold text-primary uppercase">{q.subtopic}</span>
+                                </div>
+                                <button className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 transition-colors">
+                                    Details <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                    {extractedQuestions.length === 0 && (
+                        <div className="text-center py-10 border border-dashed border-white/10 rounded-2xl">
+                            <p className="text-slate-500 text-sm italic">Analyze text to add questions here.</p>
                         </div>
                     )}
                 </div>
-            </div>
-             <div>
-                <label htmlFor="specificTopic" className={labelClass}>
-                    Specific Topic <span className="text-slate-400 font-normal normal-case">(Optional Context)</span>
-                </label>
-                {availableSpecificTopics.length > 0 ? (
-                    <select
-                        name="specificTopic"
-                        id="specificTopic"
-                        value={specificTopic}
-                        onChange={(e) => setSpecificTopic(e.target.value)}
-                        className={inputClass}
-                    >
-                        <option value="">Auto-detect from content</option>
-                        {availableSpecificTopics.map((topic, idx) => (
-                            <option key={idx} value={topic}>{topic}</option>
-                        ))}
-                    </select>
-                ) : (
-                    <input 
-                        type="text" 
-                        name="specificTopic" 
-                        id="specificTopic" 
-                        value={specificTopic} 
-                        onChange={(e) => setSpecificTopic(e.target.value)} 
-                        className={inputClass} 
-                        placeholder={isTopicMode ? "e.g. Indus Valley" : "Leave empty to auto-detect"}
-                    />
+
+                {/* Batch Summary Footer */}
+                {extractedQuestions.length > 0 && (
+                    <div className="mt-auto glass-panel p-6 rounded-2xl border-emerald-500/20 bg-emerald-500/5 sticky bottom-0">
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Batch Progress</span>
+                            <span className="text-xs font-bold text-emerald-400">Ready to Publish</span>
+                        </div>
+                        <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                            <div className="w-full h-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
+                        </div>
+                        <button
+                            onClick={handleFinalize}
+                            className="w-full mt-6 py-3 bg-white text-background-dark font-bold text-sm rounded-xl hover:bg-slate-200 transition-all active:scale-95 shadow-lg"
+                        >
+                            Finalize & Publish Batch
+                        </button>
+                    </div>
                 )}
             </div>
         </div>
-        
-        {/* Input Method Switcher */}
-        <div className="mt-6">
-            <div className="flex items-center gap-6 mb-3 border-b border-slate-100 dark:border-slate-800">
-                <button
-                    onClick={() => setInputMode('text')}
-                    className={`pb-2 text-sm font-bold transition-all border-b-2 ${inputMode === 'text' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400'}`}
-                >
-                    Paste Text
-                </button>
-                <button
-                    onClick={() => setInputMode('pdf')}
-                    className={`pb-2 text-sm font-bold transition-all border-b-2 ${inputMode === 'pdf' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400'}`}
-                >
-                    Upload PDF
-                </button>
-                 <button
-                    onClick={() => setInputMode('excel')}
-                    className={`pb-2 text-sm font-bold transition-all border-b-2 ${inputMode === 'excel' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400'}`}
-                >
-                    Excel / CSV
-                </button>
-            </div>
-            
-            {inputMode === 'text' && (
-                <div>
-                  <textarea
-                    id="rawText"
-                    value={rawText}
-                    onChange={(e) => setRawText(e.target.value)}
-                    placeholder="Paste content here... (Provide enough text for as many questions as possible)"
-                    rows={8}
-                    className={inputClass}
-                    disabled={isGenerating || isExtracting}
-                  />
-                </div>
-            )}
-            
-            {inputMode === 'pdf' && (
-                <div className="bg-slate-50 dark:bg-slate-900/50 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-8 text-center transition-all hover:border-indigo-400 dark:hover:border-indigo-600">
-                    <input 
-                        type="file" 
-                        ref={fileInputRef}
-                        accept="application/pdf"
-                        onChange={handleFileChange}
-                        className="hidden" 
-                        id="pdf-upload"
-                    />
-                    <label htmlFor="pdf-upload" className="cursor-pointer flex flex-col items-center">
-                        <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center mb-4 shadow-sm text-indigo-500 dark:text-indigo-400">
-                             {pdfFile ? <Icon name="documentText" className="w-8 h-8" /> : <Icon name="upload" className="w-8 h-8" />}
-                        </div>
-                        {pdfFile ? (
-                             <>
-                                <p className="font-bold text-slate-800 dark:text-white mb-1">{pdfFile.name}</p>
-                                <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Ready to process</p>
-                                <button 
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        setPdfFile(null);
-                                        if(fileInputRef.current) fileInputRef.current.value = "";
-                                    }}
-                                    className="mt-4 text-xs text-rose-500 hover:underline"
-                                >
-                                    Remove File
-                                </button>
-                             </>
-                        ) : (
-                             <>
-                                <p className="font-bold text-slate-700 dark:text-slate-300 mb-1">Click to upload PDF</p>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
-                                    Maximum file size: 5MB.
-                                </p>
-                             </>
-                        )}
-                    </label>
-                </div>
-            )}
-            
-            {inputMode === 'excel' && (
-                <div className="bg-slate-50 dark:bg-slate-900/50 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-8 text-center transition-all hover:border-indigo-400 dark:hover:border-indigo-600">
-                    <input 
-                        type="file" 
-                        ref={excelInputRef}
-                        accept=".xlsx, .xls, .csv"
-                        onChange={handleExcelUpload}
-                        className="hidden" 
-                        id="excel-upload"
-                    />
-                    <label htmlFor="excel-upload" className="cursor-pointer flex flex-col items-center">
-                        <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center mb-4 shadow-sm text-emerald-500 dark:text-emerald-400">
-                             {excelFile ? <Icon name="table" className="w-8 h-8" /> : <Icon name="upload" className="w-8 h-8" />}
-                        </div>
-                        {excelFile ? (
-                             <>
-                                <p className="font-bold text-slate-800 dark:text-white mb-1">{excelFile.name}</p>
-                                <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{excelFile.data.length} rows detected</p>
-                                <button 
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        setExcelFile(null);
-                                        if(excelInputRef.current) excelInputRef.current.value = "";
-                                    }}
-                                    className="mt-4 text-xs text-rose-500 hover:underline"
-                                >
-                                    Remove File
-                                </button>
-                             </>
-                        ) : (
-                             <>
-                                <p className="font-bold text-slate-700 dark:text-slate-300 mb-1">Click to upload Excel / CSV</p>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto mb-4">
-                                    Supports .xlsx, .xls, .csv
-                                </p>
-                                <button 
-                                    onClick={(e) => { e.preventDefault(); downloadTemplate(); }}
-                                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 rounded-lg text-xs font-bold text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700"
-                                >
-                                    <Icon name="download" className="w-3 h-3" /> Download Template
-                                </button>
-                             </>
-                        )}
-                    </label>
-                </div>
-            )}
+
+        <div className="flex justify-center">
+            <button onClick={onCancel} className="text-slate-500 hover:text-white font-medium transition-colors text-sm">
+                Cancel and Return
+            </button>
         </div>
-
-        {error && (
-            <div className="p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/30 rounded-xl flex items-start gap-3">
-                <Icon name="xCircle" className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
-                <p className="text-sm text-rose-600 dark:text-rose-400 font-medium">{error}</p>
-            </div>
-        )}
-
-        <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <button
-            onClick={onCancel}
-            disabled={isGenerating || isExtracting}
-            className="py-3 px-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-          >
-            Cancel
-          </button>
-          
-          <button
-            onClick={handleExtractOnly}
-            disabled={isGenerating || isExtracting}
-            className="bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 border border-sky-100 dark:border-sky-800 font-bold py-3 px-6 rounded-xl hover:bg-sky-100 dark:hover:bg-sky-900/30 transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-70 text-sm"
-          >
-            {isExtracting ? <Spinner /> : <Icon name="layers" className="w-4 h-4" />}
-            {isExtracting ? 'Extracting...' : 'Extract Questions Only'}
-          </button>
-
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating || isExtracting}
-            className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-70 text-sm"
-          >
-            {isGenerating ? <Spinner /> : <Icon name="sparkles" className="w-4 h-4" />}
-            {isGenerating ? `Processing...` : (inputMode === 'excel' ? 'Import Questions' : 'Generate with AI')}
-          </button>
-        </div>
-      </div>
-      
-      {/* PREVIEW SECTION */}
-      {(generatedQuestions.length > 0 || studyNotes) && (
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-lg border border-slate-200 dark:border-slate-800 overflow-hidden" ref={previewRef}>
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center flex-wrap gap-4">
-                   <div className="flex gap-2">
-                       <button
-                         onClick={() => setPreviewTab('questions')}
-                         className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${previewTab === 'questions' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'}`}
-                       >
-                           Questions ({generatedQuestions.length})
-                       </button>
-                       {studyNotes && (
-                        <button
-                            onClick={() => setPreviewTab('notes')}
-                            className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${previewTab === 'notes' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'}`}
-                        >
-                            Study Notes
-                        </button>
-                       )}
-                   </div>
-                   
-                   <button
-                     onClick={handleAddAll}
-                     className="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-500/20 flex items-center gap-2 transition-all"
-                   >
-                       <Icon name="check" className="w-4 h-4" />
-                       Save to Database
-                   </button>
-              </div>
-
-              <div className="p-8 max-h-[600px] overflow-y-auto custom-scrollbar">
-                  {previewTab === 'questions' && (
-                      <div className="space-y-4">
-                          {generatedQuestions.map((q, i) => (
-                              <div key={i} className="p-4 border border-slate-100 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                  <div className="flex justify-between items-start mb-2">
-                                     <span className="text-[10px] font-black bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 px-1.5 py-0.5 rounded uppercase tracking-wider">{q.code}</span>
-                                     {q.subtopic && q.subtopic !== 'General' && <span className="text-[10px] font-bold text-indigo-500 uppercase">{q.subtopic}</span>}
-                                  </div>
-                                  <p className="font-bold text-slate-800 dark:text-slate-200 mb-3 text-sm">{renderPreviewText(q.question)}</p>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                                      {q.options.map((opt, idx) => (
-                                          <div key={idx} className={`text-xs px-3 py-2 rounded-lg border ${idx === q.correct_answer_index ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-600 dark:text-slate-400'}`}>
-                                              {String.fromCharCode(65 + idx)}. {renderPreviewText(opt)}
-                                          </div>
-                                      ))}
-                                  </div>
-                                  {q.explanation && (
-                                      <p className="text-xs text-slate-500 dark:text-slate-400 italic border-t border-slate-100 dark:border-slate-800 pt-2 mt-2">
-                                          <span className="font-bold not-italic text-indigo-500">Explanation: </span>
-                                          {renderPreviewText(q.explanation.substring(0, 100))}...
-                                      </p>
-                                  )}
-                                  {q.correct_answer_index === -1 && (
-                                     <div className="mt-2 text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 inline-block px-2 py-1 rounded">
-                                         ⚠️ Answer & Explanation needed
-                                     </div>
-                                  )}
-                              </div>
-                          ))}
-                      </div>
-                  )}
-
-                  {previewTab === 'notes' && (
-                      <div className="relative">
-                          <button onClick={handleCopyNotes} className="absolute top-0 right-0 p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Copy Notes">
-                              <Icon name="clipboardList" className="w-5 h-5" />
-                          </button>
-                          <div className="prose dark:prose-invert prose-stone max-w-none text-sm">
-                              {studyNotes.split('\n').map((line, i) => (
-                                  <p key={i} className="mb-2">{renderPreviewText(line)}</p>
-                              ))}
-                          </div>
-                      </div>
-                  )}
-              </div>
-          </div>
-      )}
     </div>
   );
 };
