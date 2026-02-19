@@ -43,6 +43,37 @@ const updateSyncQueue = (queue: SyncOperation[]) => {
 };
 // #endregion
 
+interface ErrorBannerProps {
+  error: string | null;
+  isWritePermissionError: boolean;
+  isReplicaIdentityError: boolean;
+  onRetry: () => void;
+}
+
+/**
+ * ⚡ OPTIMIZATION: ErrorBanner is extracted to top-level and memoized.
+ * Prevents full unmount/remount cycles when App re-renders.
+ */
+const ErrorBanner = React.memo(({ error, isWritePermissionError, isReplicaIdentityError, onRetry }: ErrorBannerProps) => {
+  if (!error || isWritePermissionError || isReplicaIdentityError) return null;
+  return (
+    <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/30 rounded-xl flex items-center justify-between animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-rose-100 dark:bg-rose-800/30 rounded-full text-rose-600 dark:text-rose-400">
+          <Icon name="lightning" className="w-4 h-4" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Connection Issue</p>
+          <p className="text-xs text-rose-600 dark:text-rose-400">Showing cached data. Updates may be delayed.</p>
+        </div>
+      </div>
+      <button onClick={onRetry} className="px-3 py-1.5 bg-white dark:bg-stone-800 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-lg border border-rose-100 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors">
+        Retry
+      </button>
+    </div>
+  );
+});
+
 const formatSupabaseError = (error: any): string => {
   if (!error) return "An unknown error occurred.";
   
@@ -114,7 +145,8 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const toggleTheme = () => {
+  // ⚡ OPTIMIZATION: Using useCallback to maintain stable references for memoized children (Header)
+  const toggleTheme = useCallback(() => {
     setIsDarkMode(prev => {
       const newMode = !prev;
       if (newMode) {
@@ -126,11 +158,12 @@ const App: React.FC = () => {
       }
       return newMode;
     });
-  };
+  }, []);
   
-  const handleLogoClick = () => {
+  // ⚡ OPTIMIZATION: Stable reference prevents full Header re-render on App state changes
+  const handleLogoClick = useCallback(() => {
     setNavKey(prev => prev + 1);
-  };
+  }, []);
 
   useEffect(() => {
     const handleSession = (session: Session | null) => {
@@ -430,12 +463,18 @@ const App: React.FC = () => {
     processSyncQueue();
   }, [processSyncQueue]);
   
-  const handleSignOut = async () => {
+  // ⚡ OPTIMIZATION: Stable reference for Header component
+  const handleSignOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('Error signing out:', error);
     }
-  };
+  }, []);
+
+  // ⚡ OPTIMIZATION: Stable reference for memoized ErrorBanner
+  const handleRetryFetch = useCallback(() => {
+    fetchQuestions(false);
+  }, [fetchQuestions]);
 
 
   const renderContent = () => {
@@ -469,31 +508,23 @@ const App: React.FC = () => {
       );
     }
     
-    const ErrorBanner = () => error && !isWritePermissionError && !isReplicaIdentityError ? (
-         <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/30 rounded-xl flex items-center justify-between animate-fade-in">
-            <div className="flex items-center gap-3">
-                <div className="p-2 bg-rose-100 dark:bg-rose-800/30 rounded-full text-rose-600 dark:text-rose-400">
-                     <Icon name="lightning" className="w-4 h-4" />
-                </div>
-                <div>
-                    <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Connection Issue</p>
-                    <p className="text-xs text-rose-600 dark:text-rose-400">Showing cached data. Updates may be delayed.</p>
-                </div>
-            </div>
-            <button onClick={() => fetchQuestions(false)} className="px-3 py-1.5 bg-white dark:bg-stone-800 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-lg border border-rose-100 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors">
-                Retry
-            </button>
-        </div>
-    ) : null;
+    const banner = (
+      <ErrorBanner
+        error={error}
+        isWritePermissionError={isWritePermissionError}
+        isReplicaIdentityError={isReplicaIdentityError}
+        onRetry={handleRetryFetch}
+      />
+    );
     
     return role === UserRole.USER ? (
       <>
-        <ErrorBanner />
+        {banner}
         <Quiz key={navKey} questions={questions} userId={session.user.id} />
       </>
     ) : (
       <>
-        <ErrorBanner />
+        {banner}
         <AdminDashboard
             key={navKey}
             questions={questions}

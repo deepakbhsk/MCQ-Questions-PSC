@@ -309,4 +309,8 @@ const ScoreScreen: React.FC<ScoreScreenProps> = ({ score, total, userAnswersCoun
   );
 };
 
-export default ScoreScreen;
+/**
+ * ⚡ OPTIMIZATION: Memoized to prevent re-renders of the complex score dashboard
+ * during background sync operations.
+ */
+export default React.memo(ScoreScreen);
