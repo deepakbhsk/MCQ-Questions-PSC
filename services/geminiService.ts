@@ -6,7 +6,8 @@ if (!process.env.API_KEY) {
   console.warn("Gemini API key not found. AI features will be disabled. Please set the API_KEY environment variable.");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+// ⚡ OPTIMIZATION: Only initialize if API key is present to prevent startup crash in browser
+const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
 
 // Model Configuration
 // 'gemini-3-pro-preview': The latest model for complex reasoning, logic, and deep explanations.
@@ -29,6 +30,7 @@ export const generateQuestionWithAi = async (topic: string): Promise<Omit<Questi
   
   Also, classify the question into one of the following subtopics based on its content: ${subtopicList}, or 'General'.`;
 
+  if (!ai) throw new Error("AI not initialized.");
   try {
     const response = await ai.models.generateContent({
         model: reasoningModel,
@@ -111,6 +113,7 @@ export const getExplanationWithAi = async (question: Question): Promise<string> 
     - Do NOT include a separate "Distractor Analysis" section.
     - Maintain a professional, academic tone.`;
 
+    if (!ai) throw new Error("AI not initialized.");
     try {
         const response = await ai.models.generateContent({
             model: reasoningModel,
@@ -146,6 +149,7 @@ export const solveQuestionWithAi = async (questionText: string, options: string[
     - **Core Concept:** [Key takeaway]
     `;
 
+    if (!ai) throw new Error("AI not initialized.");
     try {
         const response = await ai.models.generateContent({
             model: reasoningModel,
@@ -189,6 +193,7 @@ export const getQuizFeedbackWithAi = async (incorrectAnswers: IncorrectAnswer[])
 
     const prompt = `As an expert PSC exam tutor, a student has just completed a quiz. Here are the questions they answered incorrectly:\n\n${mistakesText}\n\nBased on these specific mistakes, please provide constructive feedback. Your feedback should:\n1. Start with an encouraging sentence.\n2. Identify the main topics or types of questions the student struggled with.\n3. Provide a brief, high-level tip or a key concept to remember.\n4. Use LaTeX for any math formulas.\n\nKeep the entire feedback concise (under 100 words) and use simple markdown (**bold**).`;
 
+    if (!ai) throw new Error("AI not initialized.");
     try {
         const response = await ai.models.generateContent({
             model: fastModel, // Use Flash 2.5 for faster feedback response
@@ -228,6 +233,7 @@ export const extractRawQuestionsFromText = async (
             ]
         };
 
+        if (!ai) return [];
         try {
             const response = await ai.models.generateContent({
                 model: fastModel, // Use Flash model for extraction to save tokens and speed
@@ -415,6 +421,7 @@ export const generateMcqsFromText = async (
       };
   }
 
+  if (!ai) throw new Error("AI not initialized.");
   try {
       const response = await ai.models.generateContent({
           model: reasoningModel,
