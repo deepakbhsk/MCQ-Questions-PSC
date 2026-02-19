@@ -140,4 +140,8 @@ const Header: React.FC<HeaderProps> = ({
   );
 };
 
-export default Header;
+/**
+ * ⚡ OPTIMIZATION: Memoized to prevent redundant header re-renders during app-level state changes.
+ * Paired with stable callbacks in App.tsx.
+ */
+export default React.memo(Header);

@@ -11,3 +11,14 @@
 - Always look for high-frequency state updates and isolate them.
 - Audit `useMemo` blocks for side-effects and refactor to `useEffect`.
 - Implement a "Memoization Triad": `React.memo` for child, `useMemo` for complex props, and `useCallback` for function props.
+
+## 2025-05-16 - Preventing Component Recreation and Maximizing Memoization
+
+**Learning:**
+1. **Component Recreation**: Defining a component *inside* the render function or a helper function called during render is a major performance killer. React treats it as a new component type every time, destroying and recreating the entire DOM tree.
+2. **Global Prop Stability**: Memoizing large view components (`Quiz`, `Header`) only works if the props passed to them are stable. State updates in the root component (like `syncStatus` changes) will invalidate memoization if event handlers are not wrapped in `useCallback`.
+
+**Action:**
+- Never define components inside other components' render paths.
+- Audit root-level state and ensure all handlers passed to children are wrapped in `useCallback`.
+- Memoize top-level view components that are frequently subjected to unrelated state updates (e.g., background syncs, theme toggles).

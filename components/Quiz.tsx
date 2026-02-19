@@ -778,4 +778,8 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
   );
 };
 
-export default Quiz;
+/**
+ * ⚡ OPTIMIZATION: Memoized large component tree to prevent heavy re-renders when
+ * unrelated App state (like sync status) changes.
+ */
+export default React.memo(Quiz);
