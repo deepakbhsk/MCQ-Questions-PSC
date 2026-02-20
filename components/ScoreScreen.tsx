@@ -309,4 +309,4 @@ const ScoreScreen: React.FC<ScoreScreenProps> = ({ score, total, userAnswersCoun
   );
 };
 
-export default ScoreScreen;
+export default React.memo(ScoreScreen);
