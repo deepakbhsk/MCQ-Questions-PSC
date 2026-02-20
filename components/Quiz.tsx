@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Question, QuestionLevel, IncorrectAnswer, QuizMode } from '../types';
 import QuestionCard from './QuestionCard';
 import ScoreScreen from './ScoreScreen';
@@ -211,54 +211,8 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
       startQuizSession();
   };
 
-  const handleAnswer = (optionIndex: number) => {
-    const currentQ = quizQuestions[currentQuestionIndex];
-    if (userAnswers[currentQ.id] !== undefined) return;
-    setUserAnswers(prev => ({ ...prev, [currentQ.id]: optionIndex }));
-  };
-
-  const handleNext = () => {
-    if (currentQuestionIndex < quizQuestions.length - 1) {
-      setCurrentQuestionIndex(prev => prev + 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-        handleSubmit();
-    }
-  };
-
-  const handlePrevious = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(prev => prev - 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
-  
-  const handleSaveNext = () => {
-      handleNext();
-  };
-
-  const handleClearResponse = () => {
-      const currentQ = quizQuestions[currentQuestionIndex];
-      const newAnswers = { ...userAnswers };
-      delete newAnswers[currentQ.id];
-      setUserAnswers(newAnswers);
-  };
-  
-  const handleMarkForReview = () => {
-  };
-
-  const toggleBookmark = () => {
-    const currentQ = quizQuestions[currentQuestionIndex];
-    const newBookmarks = new Set(bookmarkedQuestionIds);
-    if (newBookmarks.has(currentQ.id)) {
-      newBookmarks.delete(currentQ.id);
-    } else {
-      newBookmarks.add(currentQ.id);
-    }
-    setBookmarkedQuestionIds(newBookmarks);
-  };
-
-  const handleSubmit = () => {
+  // ⚡ Bolt: Memoized callbacks to maintain stable references for memoized child components.
+  const handleSubmit = useCallback(() => {
     let calculatedScore = 0;
     const incorrect: IncorrectAnswer[] = [];
 
@@ -282,7 +236,58 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
     setIncorrectAnswers(incorrect);
     setView('score');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [quizQuestions, userAnswers, startTime]);
+
+  const handleNext = useCallback(() => {
+    if (currentQuestionIndex < quizQuestions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+        handleSubmit();
+    }
+  }, [currentQuestionIndex, quizQuestions.length, handleSubmit]);
+
+  const handleAnswer = useCallback((optionIndex: number) => {
+    const currentQ = quizQuestions[currentQuestionIndex];
+    if (userAnswers[currentQ.id] !== undefined) return;
+    setUserAnswers(prev => ({ ...prev, [currentQ.id]: optionIndex }));
+  }, [quizQuestions, currentQuestionIndex, userAnswers]);
+
+  const handlePrevious = useCallback(() => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex(prev => prev - 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentQuestionIndex]);
+
+  const handleSaveNext = useCallback(() => {
+      handleNext();
+  }, [handleNext]);
+
+  const handleClearResponse = useCallback(() => {
+      const currentQ = quizQuestions[currentQuestionIndex];
+      setUserAnswers(prev => {
+          const newAnswers = { ...prev };
+          delete newAnswers[currentQ.id];
+          return newAnswers;
+      });
+  }, [quizQuestions, currentQuestionIndex]);
+
+  const handleMarkForReview = useCallback(() => {
+  }, []);
+
+  const toggleBookmark = useCallback(() => {
+    const currentQ = quizQuestions[currentQuestionIndex];
+    setBookmarkedQuestionIds(prev => {
+        const newBookmarks = new Set(prev);
+        if (newBookmarks.has(currentQ.id)) {
+          newBookmarks.delete(currentQ.id);
+        } else {
+          newBookmarks.add(currentQ.id);
+        }
+        return newBookmarks;
+    });
+  }, [quizQuestions, currentQuestionIndex]);
 
   const handleRestart = () => {
     setUserAnswers({});
@@ -778,4 +783,4 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
   );
 };
 
-export default Quiz;
+export default React.memo(Quiz);
