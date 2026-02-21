@@ -63,7 +63,10 @@ const CircularProgress = ({ percentage }: { percentage: number }) => {
     )
 };
 
-const ScoreScreen: React.FC<ScoreScreenProps> = ({ score, total, userAnswersCount, timeTaken, onRestart, onExit, incorrectAnswers }) => {
+/**
+ * ⚡ Bolt: Memoized ScoreScreen to prevent re-renders on parent state changes.
+ */
+const ScoreScreen: React.FC<ScoreScreenProps> = React.memo(({ score, total, userAnswersCount, timeTaken, onRestart, onExit, incorrectAnswers }) => {
     const [percentage, setPercentage] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -307,6 +310,6 @@ const ScoreScreen: React.FC<ScoreScreenProps> = ({ score, total, userAnswersCoun
         </div>
     </div>
   );
-};
+});
 
 export default ScoreScreen;

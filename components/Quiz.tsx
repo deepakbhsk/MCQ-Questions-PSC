@@ -27,7 +27,11 @@ const levelVisuals: Record<QuestionLevel, { icon: React.ComponentProps<typeof Ic
     [QuestionLevel.TOPIC]: { icon: 'lightBulb', color: 'text-sky-700 dark:text-sky-400', bg: 'bg-sky-50 dark:bg-sky-900/10', border: 'border-sky-200 dark:border-sky-800' },
 };
 
-const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
+/**
+ * ⚡ Bolt: Memoized Quiz component to prevent heavy re-renders.
+ * Isolated from App's sync and other unrelated state updates.
+ */
+const Quiz: React.FC<QuizProps> = React.memo(({ questions, userId }) => {
   const [view, setView] = useState<ViewState>('intro');
   const [dailyQuote, setDailyQuote] = useState<Quote | null>(null);
   const [customQuiz, setCustomQuiz] = useState<{ questions: Question[], notes: string, topic: string } | null>(null);
@@ -776,6 +780,6 @@ const Quiz: React.FC<QuizProps> = ({ questions, userId }) => {
         </div>
     </div>
   );
-};
+});
 
 export default Quiz;
