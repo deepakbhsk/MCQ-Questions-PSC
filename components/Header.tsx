@@ -16,7 +16,11 @@ interface HeaderProps {
   onLogoClick: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ 
+/**
+ * ⚡ Bolt: Memoized Header to prevent redundant re-renders.
+ * Combined with useCallback in App.tsx for stable function props.
+ */
+const Header: React.FC<HeaderProps> = React.memo(({
     currentRole, 
     onRoleChange, 
     syncStatus, 
@@ -138,6 +142,6 @@ const Header: React.FC<HeaderProps> = ({
         </div>
     </header>
   );
-};
+});
 
 export default Header;

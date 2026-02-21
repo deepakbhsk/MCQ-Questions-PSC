@@ -87,6 +87,37 @@ const formatSupabaseError = (error: any): string => {
   }
 };
 
+interface ErrorBannerProps {
+  error: string | null;
+  isWritePermissionError: boolean;
+  isReplicaIdentityError: boolean;
+  onRetry: () => void;
+}
+
+/**
+ * ⚡ Bolt: Memoized ErrorBanner to prevent unnecessary re-renders.
+ * Extracted from App component to avoid full unmount/remount on every render.
+ */
+const ErrorBanner: React.FC<ErrorBannerProps> = React.memo(({ error, isWritePermissionError, isReplicaIdentityError, onRetry }) => {
+  if (!error || isWritePermissionError || isReplicaIdentityError) return null;
+
+  return (
+    <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/30 rounded-xl flex items-center justify-between animate-fade-in">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-rose-100 dark:bg-rose-800/30 rounded-full text-rose-600 dark:text-rose-400">
+          <Icon name="lightning" className="w-4 h-4" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Connection Issue</p>
+          <p className="text-xs text-rose-600 dark:text-rose-400">Showing cached data. Updates may be delayed.</p>
+        </div>
+      </div>
+      <button onClick={onRetry} className="px-3 py-1.5 bg-white dark:bg-stone-800 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-lg border border-rose-100 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors">
+        Retry
+      </button>
+    </div>
+  );
+});
 
 const App: React.FC = () => {
   const [role, setRole] = useState<UserRole>(UserRole.USER);
@@ -101,6 +132,24 @@ const App: React.FC = () => {
   
   const [navKey, setNavKey] = useState(0);
 
+  const fetchQuestions = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
+    setError(null);
+    try {
+      const { data, error } = await supabase.from('questions').select('*').order('created_at', { ascending: true });
+      if (error) throw error;
+      const serverQuestions = data || [];
+      setQuestions(serverQuestions);
+      setStoredQuestions(serverQuestions);
+    } catch (err: any) {
+      const formattedError = formatSupabaseError(err);
+      console.error("Error fetching questions:", err);
+      setError(`Failed to fetch questions: ${formattedError}`);
+    } finally {
+      if (showLoading) setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme');
     const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -114,7 +163,12 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const toggleTheme = () => {
+  /**
+   * ⚡ Bolt: Optimizing App rendering performance.
+   * Prevents re-renders of large components (Header, Quiz, AdminDashboard)
+   * when unrelated state like syncStatus or individual questions change.
+   */
+  const toggleTheme = useCallback(() => {
     setIsDarkMode(prev => {
       const newMode = !prev;
       if (newMode) {
@@ -126,11 +180,18 @@ const App: React.FC = () => {
       }
       return newMode;
     });
-  };
+  }, []);
   
-  const handleLogoClick = () => {
+  const handleLogoClick = useCallback(() => {
     setNavKey(prev => prev + 1);
-  };
+  }, []);
+
+  /**
+   * ⚡ Bolt: Stabilized retry handler to ensure stable props for ErrorBanner.
+   */
+  const handleRetryFetch = useCallback(() => {
+    fetchQuestions(false);
+  }, [fetchQuestions]);
 
   useEffect(() => {
     const handleSession = (session: Session | null) => {
@@ -269,7 +330,7 @@ const App: React.FC = () => {
     if (!errorOccurred) {
         fetchQuestions(false);
     }
-  }, [syncStatus]);
+  }, [syncStatus, fetchQuestions]);
 
   useEffect(() => {
     if (syncStatus !== 'error') return;
@@ -278,24 +339,6 @@ const App: React.FC = () => {
     }, 30000);
     return () => clearInterval(intervalId);
   }, [syncStatus, processSyncQueue]);
-
-  const fetchQuestions = useCallback(async (showLoading = true) => {
-    if (showLoading) setIsLoading(true);
-    setError(null);
-    try {
-      const { data, error } = await supabase.from('questions').select('*').order('created_at', { ascending: true });
-      if (error) throw error;
-      const serverQuestions = data || [];
-      setQuestions(serverQuestions);
-      setStoredQuestions(serverQuestions);
-    } catch (err: any) {
-      const formattedError = formatSupabaseError(err);
-      console.error("Error fetching questions:", err);
-      setError(`Failed to fetch questions: ${formattedError}`);
-    } finally {
-      if (showLoading) setIsLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     if (!supabase) {
@@ -430,12 +473,12 @@ const App: React.FC = () => {
     processSyncQueue();
   }, [processSyncQueue]);
   
-  const handleSignOut = async () => {
+  const handleSignOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('Error signing out:', error);
     }
-  };
+  }, []);
 
 
   const renderContent = () => {
@@ -469,31 +512,24 @@ const App: React.FC = () => {
       );
     }
     
-    const ErrorBanner = () => error && !isWritePermissionError && !isReplicaIdentityError ? (
-         <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/30 rounded-xl flex items-center justify-between animate-fade-in">
-            <div className="flex items-center gap-3">
-                <div className="p-2 bg-rose-100 dark:bg-rose-800/30 rounded-full text-rose-600 dark:text-rose-400">
-                     <Icon name="lightning" className="w-4 h-4" />
-                </div>
-                <div>
-                    <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Connection Issue</p>
-                    <p className="text-xs text-rose-600 dark:text-rose-400">Showing cached data. Updates may be delayed.</p>
-                </div>
-            </div>
-            <button onClick={() => fetchQuestions(false)} className="px-3 py-1.5 bg-white dark:bg-stone-800 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-lg border border-rose-100 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors">
-                Retry
-            </button>
-        </div>
-    ) : null;
-    
     return role === UserRole.USER ? (
       <>
-        <ErrorBanner />
+        <ErrorBanner
+          error={error}
+          isWritePermissionError={isWritePermissionError}
+          isReplicaIdentityError={isReplicaIdentityError}
+          onRetry={handleRetryFetch}
+        />
         <Quiz key={navKey} questions={questions} userId={session.user.id} />
       </>
     ) : (
       <>
-        <ErrorBanner />
+        <ErrorBanner
+          error={error}
+          isWritePermissionError={isWritePermissionError}
+          isReplicaIdentityError={isReplicaIdentityError}
+          onRetry={handleRetryFetch}
+        />
         <AdminDashboard
             key={navKey}
             questions={questions}
