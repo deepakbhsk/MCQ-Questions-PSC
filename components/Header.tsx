@@ -16,7 +16,7 @@ interface HeaderProps {
   onLogoClick: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ 
+const Header: React.FC<HeaderProps> = React.memo(({
     currentRole, 
     onRoleChange, 
     syncStatus, 
@@ -138,6 +138,6 @@ const Header: React.FC<HeaderProps> = ({
         </div>
     </header>
   );
-};
+});
 
 export default Header;

@@ -11,3 +11,9 @@
 - Always look for high-frequency state updates and isolate them.
 - Audit `useMemo` blocks for side-effects and refactor to `useEffect`.
 - Implement a "Memoization Triad": `React.memo` for child, `useMemo` for complex props, and `useCallback` for function props.
+
+## 2025-05-16 - Callback Hoisting and Reference Errors
+
+**Learning:** `const` variable definitions (including those using `useCallback`) are not hoisted. If a callback (e.g., `handleNext`) references another callback (e.g., `handleSubmit`) in its dependency array or body, the referenced callback must be defined *before* the one referencing it to avoid `ReferenceError`.
+
+**Action:** Always order `useCallback` hooks based on their dependency graph, defining the "leaves" or independent functions first.
